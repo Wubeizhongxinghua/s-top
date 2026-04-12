@@ -1623,27 +1623,121 @@ fn render_node_detail(
 
     let jobs = app.visible_node_jobs();
     let resource_scale = JobResourceScale::from_jobs(&jobs);
-    let headers = vec![
-        Line::from("Job ID"),
-        Line::from("User"),
-        Line::from("State"),
-        Line::from("Runtime"),
-        Line::from("Resource footprint"),
-        Line::from("Partition"),
-        Line::from("Where"),
-        Line::from("Why"),
-        Line::from("Name"),
-    ];
-    let column_widths = vec![8, 10, 11, 10, 22, 11, 16, 16, 18];
-    let full_rows: Vec<Vec<Cell>> = jobs
+    let resource_texts = jobs
+        .iter()
+        .map(|job| resource_footprint_text(job, &resource_scale))
+        .collect::<Vec<_>>();
+    let resource_segments = max_segments(&resource_texts, RESOURCE_SEGMENT_WIDTH);
+    let name_segments = max_segments(
+        &jobs.iter().map(|job| job.name.clone()).collect::<Vec<_>>(),
+        NAME_SEGMENT_WIDTH,
+    );
+    let partition_width = jobs
+        .iter()
+        .map(|job| job.partition_raw.chars().count())
+        .max()
+        .unwrap_or(11)
+        .clamp(11, 32) as u16;
+    let where_width = jobs
+        .iter()
+        .map(|job| job.location_or_reason.chars().count())
+        .max()
+        .unwrap_or(18)
+        .clamp(18, 72) as u16;
+    let why_width = jobs
         .iter()
         .map(|job| {
+            if job.pending {
+                job.location_or_reason.chars().count()
+            } else {
+                job.state.chars().count()
+            }
+        })
+        .max()
+        .unwrap_or(14)
+        .clamp(14, 48) as u16;
+    let mut headers = vec![
+        sortable_header(
+            "Job ID",
+            app.job_sort.column == JobColumn::JobId,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "User",
+            app.job_sort.column == JobColumn::User,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "State",
+            app.job_sort.column == JobColumn::State,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "Runtime",
+            app.job_sort.column == JobColumn::Runtime,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "Partition",
+            app.job_sort.column == JobColumn::Partition,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header("Where", false, app.job_sort.direction, theme),
+        sortable_header("Why", false, app.job_sort.direction, theme),
+    ];
+    let mut column_widths = vec![8, 10, 11, 10, partition_width, where_width, why_width];
+    let mut header_hits = vec![
+        Some(MouseHit::JobHeader(JobColumn::JobId)),
+        Some(MouseHit::JobHeader(JobColumn::User)),
+        Some(MouseHit::JobHeader(JobColumn::State)),
+        Some(MouseHit::JobHeader(JobColumn::Runtime)),
+        Some(MouseHit::JobHeader(JobColumn::Partition)),
+        None,
+        None,
+    ];
+    for segment in 0..resource_segments {
+        headers.push(sortable_header(
+            if resource_segments > 1 && segment > 0 {
+                "Resource footprint →"
+            } else {
+                "Resource footprint"
+            },
+            false,
+            app.job_sort.direction,
+            theme,
+        ));
+        column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
+        header_hits.push(None);
+    }
+    for segment in 0..name_segments {
+        headers.push(sortable_header(
+            if name_segments > 1 && segment > 0 {
+                "Name →"
+            } else {
+                "Name"
+            },
+            app.job_sort.column == JobColumn::Name,
+            app.job_sort.direction,
+            theme,
+        ));
+        column_widths.push(NAME_SEGMENT_WIDTH as u16);
+        header_hits.push(Some(MouseHit::JobHeader(JobColumn::Name)));
+    }
+    let full_rows: Vec<Vec<Cell>> = jobs
+        .iter()
+        .zip(resource_texts.iter())
+        .map(|(job, resource_text)| {
             let why_text = if job.pending {
                 job.location_or_reason.clone()
             } else {
                 job.state.clone()
             };
-            vec![
+            let mut cells = vec![
                 Cell::from(job.job_id.clone()),
                 Cell::from(Line::from(vec![Span::styled(
                     job.user.clone(),
@@ -1651,15 +1745,28 @@ fn render_node_detail(
                 )])),
                 Cell::from(job.state.clone()),
                 Cell::from(job.runtime_raw.clone()),
-                Cell::from(job_resource_cell(job, &resource_scale, theme)),
                 Cell::from(Line::from(vec![Span::styled(
                     job.partition_raw.clone(),
                     theme.partition_style(job.primary_partition()),
                 )])),
                 Cell::from(job.location_or_reason.clone()),
                 Cell::from(why_text),
-                Cell::from(job.name.clone()),
-            ]
+            ];
+            for segment in 0..resource_segments {
+                cells.push(Cell::from(segment_text(
+                    resource_text,
+                    segment,
+                    RESOURCE_SEGMENT_WIDTH,
+                )));
+            }
+            for segment in 0..name_segments {
+                cells.push(Cell::from(segment_text(
+                    &job.name,
+                    segment,
+                    NAME_SEGMENT_WIDTH,
+                )));
+            }
+            cells
         })
         .collect();
     let (visible_indices, hidden_left, hidden_right) = visible_column_indices(
@@ -1674,6 +1781,10 @@ fn render_node_detail(
     let visible_headers = visible_indices
         .iter()
         .map(|index| headers[*index].clone())
+        .collect::<Vec<_>>();
+    let visible_hits = visible_indices
+        .iter()
+        .map(|index| header_hits[*index].clone())
         .collect::<Vec<_>>();
     let table_rows: Vec<Row> = jobs
         .iter()
@@ -1696,7 +1807,7 @@ fn render_node_detail(
         Some(node.selected_job.min(jobs.len().saturating_sub(1)))
     });
     frame.render_stateful_widget(
-        Table::new(table_rows, constraints)
+        Table::new(table_rows, constraints.clone())
             .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
             .block(Block::default().borders(Borders::ALL).title(format!(
                 "Jobs on this Node  Hidden left: {}  Hidden right: {}",
@@ -1708,6 +1819,7 @@ fn render_node_detail(
         &mut table_state,
     );
     register_table_rows(hit_map, sections[2], jobs.len(), RowKind::NodeJobs);
+    register_header_hits(hit_map, sections[2], &constraints, &visible_hits);
 }
 
 #[allow(dead_code)]
@@ -2890,43 +3002,6 @@ fn partition_summary_line(usage: &UserUsage, theme: &Theme) -> Line<'static> {
     }
 }
 
-fn job_resource_cell(job: &JobRecord, scale: &JobResourceScale, theme: &Theme) -> Line<'static> {
-    let nodes = metric_segment_spans(
-        "Node",
-        Some(job.nodes),
-        scale.max_nodes,
-        scale.node_digits(),
-        5,
-        theme.accent,
-        theme,
-    );
-    let cpus = metric_segment_spans(
-        "CPU",
-        job.cpus,
-        scale.max_cpus,
-        scale.cpu_digits(),
-        5,
-        theme.warning,
-        theme,
-    );
-    let gpus = metric_segment_spans(
-        "GPU",
-        job.requested_gpus,
-        scale.max_gpus,
-        scale.gpu_digits(),
-        5,
-        theme.mine,
-        theme,
-    );
-    let mut spans = Vec::new();
-    spans.extend(nodes);
-    spans.push(Span::raw("  "));
-    spans.extend(cpus);
-    spans.push(Span::raw("  "));
-    spans.extend(gpus);
-    Line::from(spans)
-}
-
 fn resource_footprint_text(job: &JobRecord, scale: &JobResourceScale) -> String {
     [
         metric_segment_text(
@@ -2973,47 +3048,6 @@ fn user_resource_footprint_text(usage: &UserUsage, scale: &UserResourceScale) ->
         ),
     ]
     .join("  ")
-}
-
-fn metric_segment_spans(
-    label: &str,
-    value: Option<u32>,
-    max_value: u32,
-    digits: usize,
-    width: usize,
-    style: Style,
-    theme: &Theme,
-) -> Vec<Span<'static>> {
-    let mut spans = vec![Span::raw(format!("{label:<4} "))];
-    match value {
-        Some(value) => spans.extend(metric_bar_spans(
-            value, max_value, width, digits, style, theme,
-        )),
-        None => spans.extend(metric_na_spans(theme)),
-    }
-    spans
-}
-
-fn metric_bar_spans(
-    value: u32,
-    max_value: u32,
-    width: usize,
-    digits: usize,
-    style: Style,
-    theme: &Theme,
-) -> Vec<Span<'static>> {
-    let filled = scaled_bar_width(u64::from(value), u64::from(max_value.max(1)), width);
-    vec![
-        Span::styled("[".to_string(), theme.muted),
-        Span::styled("█".repeat(filled), style),
-        Span::styled("·".repeat(width.saturating_sub(filled)), theme.muted),
-        Span::styled("]".to_string(), theme.muted),
-        Span::raw(format!(" {:>digits$}", value)),
-    ]
-}
-
-fn metric_na_spans(theme: &Theme) -> Vec<Span<'static>> {
-    vec![Span::styled("[n/a]", theme.muted)]
 }
 
 fn metric_bar_text(value: u32, max_value: u32, width: usize, digits: usize) -> String {

@@ -93,8 +93,6 @@ Classic Slurm workflows are powerful, but they fragment context:
 - Mine Running / Mine Pending / Others Running / Others Pending
 - rolling cluster trend
 
-![Overview dashboard](docs/screenshots/overview-dashboard.png)
-
 ### My Jobs
 
 - live search, filters, sort, and horizontal view movement
@@ -205,6 +203,22 @@ cargo build --release
 ```bash
 cargo install --path .
 ```
+
+### Download Prebuilt Binaries
+
+Tagged GitHub releases publish ready-to-run archives for:
+
+- Linux `x86_64`
+- macOS `x86_64`
+- macOS `aarch64` / Apple Silicon
+- Windows `x86_64`
+
+Each archive includes:
+
+- the `s-top` binary
+- `README.md`
+- `README.zh-CN.md`
+- `config.example.toml`
 
 ### Run
 

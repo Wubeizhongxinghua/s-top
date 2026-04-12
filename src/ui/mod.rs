@@ -2688,9 +2688,9 @@ fn build_trend_lines(
             let run_level = scaled_level(run[column], max_value, height);
             let pend_level = scaled_level(pend[column], max_value, height);
             let span = match (run_level >= threshold, pend_level >= threshold) {
-                (true, true) => Span::styled("◎", theme.accent),
-                (true, false) => Span::styled("●", theme.success),
-                (false, true) => Span::styled("○", theme.warning),
+                (true, true) => Span::styled("◎", theme.running_pending_overlap),
+                (true, false) => Span::styled("●", theme.running),
+                (false, true) => Span::styled("○", theme.pending),
                 (false, false) => Span::styled("·", theme.muted),
             };
             spans.push(span);
@@ -3206,14 +3206,14 @@ fn job_state_style(job: &JobRecord, theme: &Theme) -> Style {
             if job.is_mine {
                 theme.mine.add_modifier(Modifier::BOLD)
             } else {
-                theme.success
+                theme.running
             }
         }
         "PENDING" | "CONFIGURING" => {
             if job.is_mine {
-                theme.warning.add_modifier(Modifier::BOLD)
+                theme.pending.add_modifier(Modifier::BOLD)
             } else {
-                theme.warning
+                theme.pending
             }
         }
         "FAILED" | "TIMEOUT" | "CANCELLED" => theme.danger,

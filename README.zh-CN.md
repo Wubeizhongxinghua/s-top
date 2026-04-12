@@ -76,7 +76,6 @@ README 已直接引用最终截图路径。后续只需把图片放入 `docs/scr
 
 ![Cancel Preview](docs/screenshots/cancel-preview.png)
 
-截图拍摄清单见 [docs/screenshots/SHOTLIST.md](docs/screenshots/SHOTLIST.md)。
 
 ## 页面说明
 
@@ -131,8 +130,6 @@ cargo install --path .
 
 ### 从 crates.io 安装
 
-在 crate 发布到 crates.io 后，可以直接执行：
-
 ```bash
 cargo install s-top
 ```
@@ -144,30 +141,6 @@ cargo install s-top
 ```bash
 conda install -c wubeizhongxinghua s-top
 ```
-
-### 预编译二进制
-
-GitHub Release 会提供以下平台的预编译压缩包：
-
-- Linux `x86_64`
-- macOS `x86_64`
-- macOS `aarch64`
-- Windows `x86_64`
-
-每个压缩包包含：
-
-- `s-top` 可执行文件
-- `README.md`
-- `README.zh-CN.md`
-- `config.example.toml`
-
-仓库还提供了以下自动化发布能力：
-
-- 发布 Rust crate 到 crates.io
-- 基于 `recipe/` 构建 Linux `conda` 包
-- 在配置 token 后自动上传 conda 包到 Anaconda.org
-
-conda recipe 现在会显式固定较低的 Linux `glibc` 基线，避免构建产物继承 GitHub runner 上过新的系统 libc 依赖，从而提升在常见 HPC 环境中的可运行性。
 
 ## 使用方法
 

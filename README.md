@@ -93,6 +93,8 @@ Classic Slurm workflows are powerful, but they fragment context:
 - Mine Running / Mine Pending / Others Running / Others Pending
 - rolling cluster trend
 
+<!-- ![Overview dashboard](docs/screenshots/overview-dashboard.png) -->
+
 ### My Jobs
 
 - live search, filters, sort, and horizontal view movement

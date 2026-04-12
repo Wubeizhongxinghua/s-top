@@ -1,4 +1,4 @@
-{% set version = environ.get("ST_VERSION", "0.1.5") %}
+{% set version = environ.get("ST_VERSION", "0.1.6") %}
 
 package:
   name: s-top

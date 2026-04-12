@@ -129,7 +129,6 @@ cargo install --path .
 
 ### Install from crates.io
 
-After the crate has been published to crates.io:
 
 ```bash
 cargo install s-top
@@ -137,35 +136,10 @@ cargo install s-top
 
 ### Install with conda
 
-After the conda package has been published to the project channel:
 
 ```bash
 conda install -c wubeizhongxinghua s-top
 ```
-
-### Prebuilt Binaries
-
-GitHub Releases publish prebuilt archives for:
-
-- Linux `x86_64`
-- macOS `x86_64`
-- macOS `aarch64`
-- Windows `x86_64`
-
-Each release archive contains:
-
-- the `s-top` executable
-- `README.md`
-- `README.zh-CN.md`
-- `config.example.toml`
-
-The repository also includes automation for:
-
-- publishing the Rust crate to crates.io
-- building a Linux `conda` package from `recipe/`
-- uploading the conda artifact to Anaconda.org when a token is configured
-
-The conda recipe explicitly targets an older Linux glibc baseline so that the packaged binary can run on typical HPC systems instead of inheriting the GitHub runner's host libc requirement.
 
 ## Usage
 

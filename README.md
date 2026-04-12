@@ -2,197 +2,120 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
-> A modern Slurm TUI for people who need to understand queue pressure, partition usage, user ownership, and job detail at a glance.
-
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
 ![TUI](https://img.shields.io/badge/TUI-ratatui%20%2B%20crossterm-4c8eda)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%2F%20Slurm-2f855a)
-![Mode](https://img.shields.io/badge/Data%20Path-text%20Slurm%20commands-805ad5)
-![Status](https://img.shields.io/badge/Status-active%20iteration-0ea5e9)
+![Data Path](https://img.shields.io/badge/Data%20Path-text%20Slurm%20commands-805ad5)
 
-## What It Is
+`s-top` is a terminal monitor for Slurm clusters. It is designed for ordinary cluster users who need a readable, continuously refreshed view of partitions, queues, users, and jobs without relying on `slurmrestd` or Slurm JSON output.
 
-`s-top` is a full-screen terminal monitor for Slurm clusters. It focuses on the scheduler view:
+![Overview](docs/screenshots/overview-hero.png)
+
+## Overview
+
+The project focuses on the scheduler view rather than low-level hardware telemetry. The main questions it aims to answer are:
 
 - which partitions are busy
-- how much is mine vs other users
-- who is consuming resources
+- how current usage is split between the current user and other users
 - which jobs are running or pending
+- which users occupy the most resources
 - how queue pressure changes over time
 
-It is intentionally built for ordinary HPC users:
+The implementation assumes a typical HPC user environment:
 
-- no root access required
-- no `slurmrestd`
-- no dependency on `squeue --json` or `sinfo --json`
-- tolerant of partial Slurm capabilities and site-specific differences
+- no root privileges
+- no dependency on `slurmrestd`
+- no requirement for `squeue --json` or `sinfo --json`
+- graceful degradation when a site does not expose optional Slurm fields
 
-![s-top overview hero](docs/screenshots/overview-hero.png)
+## Main Features
 
-## Why
+- Full-screen TUI built with `ratatui` and `crossterm`
+- Periodic refresh with cancellation and command timeouts
+- Partition overview with pressure, ownership split, and trend history
+- My Jobs and All Jobs views with search, filtering, sorting, and horizontal navigation
+- User view with per-user queue and resource summaries
+- Partition and node drill-down pages
+- Structured job detail modal
+- Conservative single-job and bulk `scancel` workflows
+- Mouse support for tabs, rows, headers, modal actions, and basic navigation
 
-Classic Slurm workflows are powerful, but they fragment context:
+## Screenshots
 
-- `squeue` is precise, but not easy to scan at cluster scale
-- `sinfo` shows node state, but not ownership or queue pressure
-- `watch` helps with refresh, but not with structure, search, sorting, or drill-down
-
-`s-top` tries to fill that gap with a scheduler-centric dashboard:
-
-- **Overview first**: see pressure, ownership, and job state distribution immediately
-- **Queue-first workflow**: inspect jobs, users, partitions, and nodes without leaving the TUI
-- **Operational detail**: structured job detail, safe cancel flows, and mouse interaction
-- **Trend awareness**: rolling running/pending history instead of a single snapshot
-
-## Highlights
-
-### Cluster-wide visibility
-
-- **Overview dashboard** with pressure bars, ownership split, and rolling running/pending trends
-- **Stable partition colors** across overview, jobs, detail pages, and user summaries
-- **Fast refresh path** based on lightweight Slurm text commands
-
-### Queue analysis
-
-- **My Jobs** and **All Jobs** pages with search, filters, sort, and horizontal view movement
-- **User View** to rank active users by jobs and resources, then inspect the selected user's jobs
-- **Partition Detail** and **Node Detail** for focused drill-down
-
-### Job operations
-
-- **Structured job detail modal** with grouped sections instead of raw text blobs
-- **Single-job and bulk `scancel`** with preview and conservative ownership checks
-- **Click-outside-to-close** job detail modal for smoother mouse-driven workflows
-
-### Usability
-
-- **Incremental search** with live filtering
-- **Clickable column headers** for mouse sorting
-- **Horizontal scrolling** for wide queue tables and resource-heavy views
-- **Fast exit** and cancellable Slurm subprocesses
-
-## Feature Summary
-
-| Area | What You Get |
-| --- | --- |
-| Overview | Partition pressure, Mine/Other ownership, running/pending split, rolling cluster trend |
-| Jobs | My jobs and all jobs, filters, sorting, resource footprint bars, horizontal view movement |
-| Users | Per-user running/pending counts, resource totals, top partitions, selected-user job list |
-| Partition | Pressure summary, node-state distribution, node picker, partition-local trend |
-| Node | User/state/where/why filters with node-local jobs |
-| Job Detail | Grouped panels for metadata, resources, scheduling, placement, and paths |
-| Mouse | Tab switching, row selection, double-click open, header sorting, footer actions, click-outside close |
-
-## Preview
-
-> The screenshot paths below are intentionally wired into the README so you can drop images into `docs/screenshots/` later without rewriting the document.
+The README is wired to the final screenshot paths. You can add the actual image files under `docs/screenshots/` without changing the document structure.
 
 ### Overview
 
-- partition pressure
-- Mine Running / Mine Pending / Others Running / Others Pending
-- rolling cluster trend
-
-<!-- ![Overview dashboard](docs/screenshots/overview-dashboard.png) -->
+![Overview](docs/screenshots/overview-hero.png)
 
 ### My Jobs
 
-- live search, filters, sort, and horizontal view movement
-- full `Name` visibility via horizontal scrolling
-- compact `resource footprint` for Node / CPU / GPU
-
-![My Jobs view](docs/screenshots/my-jobs.png)
+![My Jobs](docs/screenshots/my-jobs.png)
 
 ### All Jobs
 
-- cluster-wide active queue with mine highlighting
-- `Where / Why` kept ahead of `Name` for faster triage
-- wide-table browsing with horizontal movement
-
-![All Jobs view](docs/screenshots/all-jobs.png)
+![All Jobs](docs/screenshots/all-jobs.png)
 
 ### Users
 
-- per-user running / pending totals
-- resource footprint ranking
-- selected-user drill-down with active jobs
-
-![Users view](docs/screenshots/users.png)
+![Users](docs/screenshots/users.png)
 
 ### Partition Detail
 
-- partition-local trend
-- node-state breakdown
-- selected partition job table
-
-![Partition detail](docs/screenshots/partition-detail.png)
+![Partition Detail](docs/screenshots/partition-detail.png)
 
 ### Node Detail
 
-- per-node job list
-- `user` / `state` / `where` / `why` interactive filters
-- focused debugging view for a single node
-
-![Node detail](docs/screenshots/node-detail.png)
-
-### Queue Pages
-
-- resource footprint bars with values aligned to the right of bars
-- resource footprint focuses on Node / CPU / GPU
-- `Where / Why` before `Name`
-- `Left` / `Right` horizontal view movement for wide tables
+![Node Detail](docs/screenshots/node-detail.png)
 
 ### Job Detail
 
-- grouped modal layout instead of plain text
-- click outside to close
-- keeps the underlying page state intact
-
-![Job detail modal](docs/screenshots/job-detail.png)
+![Job Detail](docs/screenshots/job-detail.png)
 
 ### Cancel Preview
 
-- single-job and bulk cancel flows use a separate confirmation surface
-- preview clearly shows what will and will not be cancelled
+![Cancel Preview](docs/screenshots/cancel-preview.png)
 
-![Cancel preview modal](docs/screenshots/cancel-preview.png)
+Screenshot capture notes are maintained in [docs/screenshots/SHOTLIST.md](docs/screenshots/SHOTLIST.md).
 
-### Optional GIF / Demo Clips
+## Views
 
-If you later want animated demos, these are good candidates:
+### Overview
 
-- `docs/screenshots/demo-overview.gif`
-- `docs/screenshots/demo-search-and-sort.gif`
-- `docs/screenshots/demo-job-detail-and-cancel.gif`
-- `docs/screenshots/demo-node-filtering.gif`
+The initial page shows cluster-wide partition pressure, ownership distribution, running versus pending counts, and a rolling trend.
 
-## Data Sources
+### My Jobs
 
-Primary commands used by the fast path:
+Shows the current user's active jobs. This page is intended for day-to-day queue inspection and job operations.
 
-- `sinfo -Nh -o '%P<sep>%t<sep>%N<sep>%c<sep>%m<sep>%G'`
-- `squeue -h -t PENDING,RUNNING,CONFIGURING,COMPLETING,SUSPENDED -o '%i<sep>%u<sep>%a<sep>%P<sep>%j<sep>%T<sep>%M<sep>%l<sep>%D<sep>%C<sep>%b<sep>%V<sep>%Q<sep>%R'`
-- `scontrol show partition`
-- `scontrol show node -o <node>`
-- `squeue -h -w <node> ...`
-- `scontrol show job -o <jobid>`
-- `sacct -n -P -X -j <jobid> ...` for job detail enrichment
+### All Jobs
 
-Design notes:
+Shows the active queue across all visible users. Rows belonging to the current user remain visually distinct.
 
-- `s-top` treats Slurm JSON output as optional, not required
-- parsing uses an explicit separator (`\x1f`) instead of whitespace guessing
-- all external commands run with timeout and cancellation
-- the UI never blocks on shell commands directly
+### Users
+
+Provides per-user summaries for running jobs, pending jobs, total jobs, resource footprint, and dominant partitions. The lower pane shows active jobs for the selected user.
+
+### Partition Detail
+
+Shows a selected partition in more detail, including node-state distribution, partition-local trends, nodes, and jobs in that partition.
+
+### Node Detail
+
+Shows jobs on a selected node together with interactive `user`, `state`, `where`, and `why` filters.
+
+### Job Detail
+
+Displays a structured modal for a selected job. Fields are grouped by purpose instead of being emitted as an unstructured text block.
 
 ## Installation
 
 ### Requirements
 
 - Linux
-- Rust stable toolchain
-- Slurm client commands available in `PATH`
-- a terminal that supports fullscreen TUIs
+- Rust stable
+- Slurm client commands in `PATH`
+- a terminal that supports full-screen TUIs
 
 ### Build From Source
 
@@ -206,21 +129,23 @@ cargo build --release
 cargo install --path .
 ```
 
-### Download Prebuilt Binaries
+### Prebuilt Binaries
 
-Tagged GitHub releases publish ready-to-run archives for:
+GitHub Releases publish prebuilt archives for:
 
 - Linux `x86_64`
 - macOS `x86_64`
-- macOS `aarch64` / Apple Silicon
+- macOS `aarch64`
 - Windows `x86_64`
 
-Each archive includes:
+Each release archive contains:
 
-- the `s-top` binary
+- the `s-top` executable
 - `README.md`
 - `README.zh-CN.md`
 - `config.example.toml`
+
+## Usage
 
 ### Run
 
@@ -228,223 +153,113 @@ Each archive includes:
 ./target/release/s-top
 ```
 
-Override refresh interval:
+### Common Options
 
 ```bash
-cargo run --release -- --interval 2
-```
-
-Single collection summary:
-
-```bash
+./target/release/s-top --interval 2
 ./target/release/s-top --once
-```
-
-Debug dump:
-
-```bash
 ./target/release/s-top --debug-dump
 ```
 
-## Quick Start
-
-1. Build the binary.
-2. Run `./target/release/s-top`.
-3. Start on **Overview** to see partition pressure and ownership.
-4. Use `Tab` to switch to **My Jobs**, **Users**, or **All Jobs`.
-5. Use `/` for live search, `s` for sort, `f` for queue-state filter, and `Enter` for detail.
-6. On wide job tables, use `Left` / `Right` to move the visible column window.
-
-## CLI
+### CLI Options
 
 | Flag | Description |
 | --- | --- |
-| `--interval <seconds>` | Refresh interval, default `2.0` |
+| `--interval <seconds>` | Refresh interval. Default: `2.0` |
 | `--user <name>` | Override the identity used for Mine / Others |
 | `--all` | Start on the All Jobs page |
 | `--no-all-jobs` | Disable the All Jobs page |
-| `--theme <auto|dark|light>` | Theme selection |
+| `--theme <auto\|dark\|light>` | Select the UI theme |
 | `--advanced-resources` | Force advanced resource columns on |
 | `--no-advanced-resources` | Hide advanced resource columns |
-| `--debug-dump` | Print raw + parsed data as JSON and exit |
-| `--once` | Print a plain-text summary and exit |
-| `--compact` | Tighter layout |
-| `--no-color` | Disable colors |
+| `--debug-dump` | Print raw and parsed data, then exit |
+| `--once` | Collect once, print a summary, then exit |
+| `--compact` | Use a denser layout |
+| `--no-color` | Disable color output |
 
-## Keybindings
+## Keybindings and Mouse Interaction
 
-| Key | Action | Views |
+### Keyboard
+
+| Key | Action | Scope |
 | --- | --- | --- |
 | `q` | Quit | Global |
 | `Tab` / `Shift-Tab` | Switch top-level pages | Global |
-| `j` / `k` / arrows | Move selection | Lists |
-| `Enter` | Open detail | Overview / queue pages |
-| `b` / `Esc` | Go back | Detail pages / modal |
+| `j` / `k` / Up / Down | Move selection | Lists |
+| `Enter` | Open detail | Overview and job lists |
+| `b` / `Esc` | Go back or close modal | Detail views and modals |
 | `/` | Start live search | Global |
-| `s` | Cycle sort key | Overview / Users / queue pages |
-| `f` | Cycle queue-state filter | Queue pages |
-| `m` | Toggle mine-only view | Shared views |
-| `g` | Cycle metric mode | Overview / Partition |
-| `p` | Pin or unpin partition | Overview / queue pages |
+| `s` | Cycle sort key | Overview, Users, job lists |
+| `f` | Cycle queue-state filter | Job lists |
+| `m` | Toggle mine-only mode | Shared views |
+| `g` | Cycle metric mode | Overview and Partition Detail |
+| `p` | Pin or unpin the current partition | Overview and job views |
 | `[` / `]` | Move selected node | Partition Detail |
 | `n` | Open selected node | Partition Detail |
 | `u` | Cycle node user filter | Node Detail |
 | `w` | Edit node `where` filter | Node Detail |
 | `y` | Edit node `why` filter | Node Detail |
 | `c` | Clear node filters | Node Detail |
-| `i` | Open job detail | Queue pages |
-| `x` | Cancel selected job | Queue pages |
-| `X` | Preview bulk cancel | Queue pages |
-| `Left` / `Right` | Move horizontal table view | Wide queue tables |
+| `i` | Open job detail | Job lists |
+| `x` | Cancel the selected job | Job lists |
+| `X` | Preview bulk cancel | Job lists |
+| `Left` / `Right` | Move the horizontal column window | Wide tables |
 
-## Mouse Controls
+### Mouse
 
 | Interaction | Result |
 | --- | --- |
-| Click top tabs | Switch page |
+| Click a tab | Switch page |
 | Click a row | Select row |
 | Double-click a row | Open detail |
 | Click a sortable header | Sort by that column |
 | Click the same header again | Reverse sort direction |
-| Wheel scroll | Move the current list |
-| Click footer actions | Trigger action |
-| Click outside job detail modal | Close modal |
-| Click `← Overview (b)` | Return to Overview |
+| Mouse wheel | Scroll the active list |
+| Click a footer action | Trigger the action |
+| Click outside the job-detail modal | Close the modal |
 
-## Views
+## Data Collection and Compatibility
 
-### Overview
+The fast path is based on text-oriented Slurm commands:
 
-The first screen is the monitoring dashboard:
+- `sinfo`
+- `squeue`
+- `scontrol show partition`
+- `scontrol show node`
+- `scontrol show job`
 
-- partition pressure
-- Mine vs Others ownership
-- running vs pending split
-- rolling cluster-wide trend
+`sacct` is used only where historical or detail enrichment is appropriate, and it is not required for the main live views.
 
-### My Jobs
+Parsing rules are intentionally conservative:
 
-Focused view of the current user's active jobs with filters, sorting, resource bars, and detail.
-
-### Users
-
-Ranks active users and shows:
-
-- running jobs
-- pending jobs
-- total jobs
-- resource totals
-- main partitions
-- selected user's active jobs
-
-### All Jobs
-
-Shared queue view with highlighting for the current user's jobs.
-
-### Partition Detail
-
-Combines summary bars, node-state distribution, a partition-local trend, and partition jobs.
-
-### Node Detail
-
-Shows node-local jobs and interactive filters for:
-
-- user
-- state
-- where
-- why
-
-### Job Detail
-
-Structured modal with grouped sections:
-
-- Basic
-- Resources
-- Scheduling
-- Placement / Reason
-- Paths / Extra
+- explicit field separators are used instead of whitespace-based parsing
+- every external command has a timeout
+- command failures degrade the corresponding panel instead of crashing the UI
+- optional fields remain optional throughout the model layer
 
 ## Project Structure
 
 | Path | Responsibility |
 | --- | --- |
-| `src/collector/` | Slurm command execution, timeout handling, cancellation, cached raw collection |
-| `src/model/` | Parsers, normalized structs, partition aggregation, user aggregation |
-| `src/app.rs` | App state, refresh orchestration, search/filter/sort state, event loop integration |
-| `src/ui/` | Rendering, theme rules, widgets, modal layout, mouse hit-testing |
+| `src/collector/` | Slurm command execution, timeout handling, cancellation, raw collection |
+| `src/model/` | Parsers, normalized data structures, aggregation |
+| `src/app.rs` | Application state, refresh orchestration, filtering, sorting, event handling |
+| `src/ui/` | Rendering, theme definitions, view composition, mouse hit testing |
 | `src/cli.rs` | CLI parsing and current-user resolution |
-| `src/config.rs` | Optional config-file support |
+| `src/config.rs` | Optional configuration support |
 | `config.example.toml` | Example configuration |
 
-## Configuration
+## Limitations
 
-Optional config file:
+- Availability of `ReqTRES`, `AllocTRES`, `GRES`, memory, and GPU fields depends on site configuration
+- Pending jobs eligible for multiple partitions may appear in more than one partition-level pending aggregation
+- Narrow terminals still require horizontal navigation on wide tables
+- Trend rendering depends on terminal font support for Unicode symbols
+- The repository does not currently include a `LICENSE` file
 
-```text
-~/.config/s-top/config.toml
-```
+## Development
 
-Example:
-
-```toml
-interval = 2.0
-all_jobs_enabled = true
-start_in_all_jobs = false
-show_advanced_resources = true
-compact = false
-no_color = false
-theme = "dark"
-```
-
-Current configuration surface is intentionally small:
-
-- refresh interval
-- user identity override
-- page availability
-- theme
-- compact mode
-- color on/off
-- advanced resource columns on/off
-
-## Notes And Troubleshooting
-
-### No JSON support on your cluster
-
-That is expected. `s-top` is designed around plain-text Slurm commands first.
-
-### Queue pages feel wide
-
-Use `Left` / `Right` to move the visible column window. `Where / Why` appears before `Name` on purpose so scheduling context stays visible sooner.
-
-### Job detail fields are missing
-
-Some fields depend on site-specific `scontrol` / `sacct` visibility. `s-top` degrades gracefully and shows `N/A` when the cluster does not expose a field.
-
-### Trend dots look slightly different across terminals
-
-The trend renderer uses Unicode dot glyphs. Most modern terminal fonts handle them well, but very old fonts may look uneven.
-
-## Known Limitations
-
-- `ReqTRES`, `AllocTRES`, `GRES`, memory, and GPU fields depend on cluster configuration
-- multi-partition pending jobs are still counted per eligible partition in partition-level pending stats
-- very narrow terminals will require horizontal view movement for queue-heavy pages
-- dot-style trend rendering depends on terminal font quality
-- the project currently keeps legacy history code in the tree, but history is not part of the default refresh path
-- no license file is included yet; choose and add one before publishing the repository
-
-## Roadmap
-
-- richer node-level resource views when Slurm exposes more stable per-node totals
-- deeper user drill-down beyond the current selected-user queue panel
-- more reusable UI submodules as the page count grows
-- optional screenshot/GIF automation for releases
-
-## Contributing
-
-Issues and pull requests are welcome.
-
-Suggested local workflow:
+Recommended local checks:
 
 ```bash
 cargo fmt
@@ -452,13 +267,6 @@ cargo test
 cargo build --release
 ```
 
-Please keep changes aligned with the current project direction:
-
-- fast first paint
-- non-blocking refresh
-- text-command compatibility across real Slurm sites
-- readable TUI over dense but ambiguous output
-
 ## License
 
-This repository does not currently ship a `LICENSE` file. Add your preferred open-source license before publishing to GitHub.
+No license file is included in the repository yet. Add one before distributing the project as a public open-source package.

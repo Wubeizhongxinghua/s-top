@@ -19,6 +19,7 @@ pub use theme::Theme as ThemePalette;
 
 const RESOURCE_SEGMENT_WIDTH: usize = 32;
 const NAME_SEGMENT_WIDTH: usize = 36;
+const PARTITION_SEGMENT_WIDTH: usize = 40;
 
 pub fn render(frame: &mut Frame, app: &AppState) -> UiHitMap {
     let theme = Theme::from_choice(app.settings.theme, app.settings.no_color);
@@ -835,12 +836,11 @@ fn render_users(
         .map(|usage| user_resource_footprint_text(usage, &user_scale))
         .collect::<Vec<_>>();
     let footprint_segments = max_segments(&user_footprints, RESOURCE_SEGMENT_WIDTH);
-    let partition_width = users
+    let partition_texts = users
         .iter()
-        .map(|usage| usage.top_partitions_summary(3).chars().count())
-        .max()
-        .unwrap_or(28)
-        .clamp(28, 42) as u16;
+        .map(|usage| usage.top_partitions_summary(3))
+        .collect::<Vec<_>>();
+    let partition_segments = max_segments(&partition_texts, PARTITION_SEGMENT_WIDTH);
     let mut headers = vec![
         sortable_header(
             "User",
@@ -888,18 +888,24 @@ fn render_users(
         column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
         header_hits.push(Some(MouseHit::UserHeader(UserColumn::ResourceFootprint)));
     }
-    headers.push(sortable_header(
-        "Top partitions",
-        app.user_sort.column == UserColumn::Partitions,
-        app.user_sort.direction,
-        theme,
-    ));
-    column_widths.push(partition_width);
-    header_hits.push(Some(MouseHit::UserHeader(UserColumn::Partitions)));
+    for segment in 0..partition_segments {
+        headers.push(sortable_header(
+            if partition_segments > 1 && segment > 0 {
+                "Top partitions →"
+            } else {
+                "Top partitions"
+            },
+            app.user_sort.column == UserColumn::Partitions,
+            app.user_sort.direction,
+            theme,
+        ));
+        column_widths.push(PARTITION_SEGMENT_WIDTH as u16);
+        header_hits.push(Some(MouseHit::UserHeader(UserColumn::Partitions)));
+    }
     let full_rows: Vec<Vec<Cell>> = users
         .iter()
-        .zip(user_footprints.iter())
-        .map(|(usage, footprint)| {
+        .zip(user_footprints.iter().zip(partition_texts.iter()))
+        .map(|(usage, (footprint, partition_text))| {
             let mut cells = vec![
                 Cell::from(Line::from(vec![Span::styled(
                     usage.user.clone(),
@@ -920,7 +926,13 @@ fn render_users(
                     RESOURCE_SEGMENT_WIDTH,
                 )));
             }
-            cells.push(Cell::from(partition_summary_line(usage, theme)));
+            for segment in 0..partition_segments {
+                cells.push(Cell::from(segment_text(
+                    partition_text,
+                    segment,
+                    PARTITION_SEGMENT_WIDTH,
+                )));
+            }
             cells
         })
         .collect();
@@ -2971,35 +2983,6 @@ fn metric_value_line(
         Span::styled("]".to_string(), theme.muted),
         Span::raw(format!(" {:>digits$}", value)),
     ])
-}
-
-fn partition_summary_line(usage: &UserUsage, theme: &Theme) -> Line<'static> {
-    let mut spans = Vec::new();
-    let mut rows: Vec<(&String, &crate::model::UsageStats)> = usage.partitions.iter().collect();
-    rows.sort_by(|(left_name, left_stats), (right_name, right_stats)| {
-        right_stats
-            .active_total(MetricMode::Jobs)
-            .cmp(&left_stats.active_total(MetricMode::Jobs))
-            .then_with(|| left_name.cmp(right_name))
-    });
-    for (index, (name, stats)) in rows.into_iter().take(3).enumerate() {
-        if index > 0 {
-            spans.push(Span::raw("  "));
-        }
-        spans.push(Span::styled(
-            name.to_string(),
-            theme.partition_style(name).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::raw(format!(
-            " (R {} / P {})",
-            stats.running_jobs, stats.pending_jobs
-        )));
-    }
-    if spans.is_empty() {
-        Line::from("No active partitions")
-    } else {
-        Line::from(spans)
-    }
 }
 
 fn resource_footprint_text(job: &JobRecord, scale: &JobResourceScale) -> String {

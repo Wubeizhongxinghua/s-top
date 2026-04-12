@@ -30,7 +30,7 @@ jobs:
 
       - name: Publish crate
         if: env.CARGO_REGISTRY_TOKEN != ''
-        run: cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+        run: cargo publish --locked
 
   build-conda:
     name: build-conda-linux-64

@@ -136,8 +136,6 @@ cargo install s-top
 
 ### 通过 conda 安装
 
-在 conda 包发布到项目 channel 后，可以直接执行：
-
 ```bash
 conda install -c wubeizhongxinghua s-top
 ```

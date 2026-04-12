@@ -145,6 +145,15 @@ After the conda package has been published to the project channel:
 conda install -c wubeizhongxinghua s-top
 ```
 
+If you do not want to repeat `-c`, add the channel once:
+
+```bash
+conda config --add channels wubeizhongxinghua
+conda install s-top
+```
+
+Note: third-party projects cannot publish directly to Anaconda's built-in `defaults` channel. A user-managed channel or a future `conda-forge` package is the practical distribution path.
+
 ### Prebuilt Binaries
 
 GitHub Releases publish prebuilt archives for:
@@ -296,6 +305,8 @@ If you intend to publish through CI, configure these repository secrets first:
 
 - `CARGO_REGISTRY_TOKEN` for crates.io publishing
 - `ANACONDA_API_TOKEN` for Anaconda.org uploads
+
+If your Anaconda.org account name is not the same as the GitHub repository owner, add a repository variable named `ANACONDA_OWNER`.
 
 ## License
 

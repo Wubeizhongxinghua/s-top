@@ -167,6 +167,8 @@ The repository also includes automation for:
 - building a Linux `conda` package from `recipe/`
 - uploading the conda artifact to Anaconda.org when a token is configured
 
+The conda recipe explicitly targets an older Linux glibc baseline so that the packaged binary can run on typical HPC systems instead of inheriting the GitHub runner's host libc requirement.
+
 ## Usage
 
 ### Run
@@ -280,6 +282,7 @@ Parsing rules are intentionally conservative:
 - Narrow terminals still require horizontal navigation on wide tables
 - Trend rendering depends on terminal font support for Unicode symbols
 - Conda packaging is currently prepared for Linux `x86_64`; additional conda targets can be added later if needed
+- The conda package currently targets a Linux `glibc` baseline of `2.17`
 
 ## License
 

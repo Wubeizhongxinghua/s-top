@@ -167,6 +167,8 @@ GitHub Release 会提供以下平台的预编译压缩包：
 - 基于 `recipe/` 构建 Linux `conda` 包
 - 在配置 token 后自动上传 conda 包到 Anaconda.org
 
+conda recipe 现在会显式固定较低的 Linux `glibc` 基线，避免构建产物继承 GitHub runner 上过新的系统 libc 依赖，从而提升在常见 HPC 环境中的可运行性。
+
 ## 使用方法
 
 ### 启动
@@ -280,6 +282,7 @@ GitHub Release 会提供以下平台的预编译压缩包：
 - 终端宽度较小时，宽表格仍需通过水平移动查看全部列
 - 趋势图依赖终端字体对 Unicode 符号的支持
 - 当前 conda 打包流程首先覆盖 Linux `x86_64`；如有需要，可以继续扩展到其他 conda 平台
+- 当前 conda 包的 Linux `glibc` 兼容基线设为 `2.17`
 
 ## License
 

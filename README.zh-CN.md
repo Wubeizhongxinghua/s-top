@@ -145,15 +145,6 @@ cargo install s-top
 conda install -c wubeizhongxinghua s-top
 ```
 
-如果你不想每次都写 `-c`，可以先把 channel 加入本地配置：
-
-```bash
-conda config --add channels wubeizhongxinghua
-conda install s-top
-```
-
-说明：第三方项目不能直接发布到 Anaconda 内置的 `defaults` channel。实际可行的方式是使用自有 channel，或后续提交到 `conda-forge`。
-
 ### 预编译二进制
 
 GitHub Release 会提供以下平台的预编译压缩包：
@@ -289,24 +280,6 @@ GitHub Release 会提供以下平台的预编译压缩包：
 - 终端宽度较小时，宽表格仍需通过水平移动查看全部列
 - 趋势图依赖终端字体对 Unicode 符号的支持
 - 当前 conda 打包流程首先覆盖 Linux `x86_64`；如有需要，可以继续扩展到其他 conda 平台
-
-## 开发与检查
-
-建议的本地检查命令：
-
-```bash
-cargo fmt
-cargo test
-cargo build --release
-cargo publish --dry-run
-```
-
-如果希望通过 CI 自动发布，请先在仓库 Secrets 中配置：
-
-- `CARGO_REGISTRY_TOKEN`：用于 crates.io 发布
-- `ANACONDA_API_TOKEN`：用于上传到 Anaconda.org
-
-如果你的 Anaconda.org 用户名和 GitHub 仓库所有者不同，再额外配置一个仓库变量 `ANACONDA_OWNER`。
 
 ## License
 

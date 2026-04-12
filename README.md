@@ -144,14 +144,6 @@ After the conda package has been published to the project channel:
 ```bash
 conda install -c wubeizhongxinghua s-top
 ```
-
-If you do not want to repeat `-c`, add the channel once:
-
-```bash
-conda config --add channels wubeizhongxinghua
-conda install s-top
-```
-
 Note: third-party projects cannot publish directly to Anaconda's built-in `defaults` channel. A user-managed channel or a future `conda-forge` package is the practical distribution path.
 
 ### Prebuilt Binaries
@@ -289,24 +281,6 @@ Parsing rules are intentionally conservative:
 - Narrow terminals still require horizontal navigation on wide tables
 - Trend rendering depends on terminal font support for Unicode symbols
 - Conda packaging is currently prepared for Linux `x86_64`; additional conda targets can be added later if needed
-
-## Development
-
-Recommended local checks:
-
-```bash
-cargo fmt
-cargo test
-cargo build --release
-cargo publish --dry-run
-```
-
-If you intend to publish through CI, configure these repository secrets first:
-
-- `CARGO_REGISTRY_TOKEN` for crates.io publishing
-- `ANACONDA_API_TOKEN` for Anaconda.org uploads
-
-If your Anaconda.org account name is not the same as the GitHub repository owner, add a repository variable named `ANACONDA_OWNER`.
 
 ## License
 

@@ -144,7 +144,6 @@ After the conda package has been published to the project channel:
 ```bash
 conda install -c wubeizhongxinghua s-top
 ```
-Note: third-party projects cannot publish directly to Anaconda's built-in `defaults` channel. A user-managed channel or a future `conda-forge` package is the practical distribution path.
 
 ### Prebuilt Binaries
 

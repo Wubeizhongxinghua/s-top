@@ -1,0 +1,9 @@
+interval = 2.0
+user = "myli"
+all_jobs_enabled = true
+start_in_all_jobs = false
+history_window = "24h"
+show_advanced_resources = true
+compact = false
+no_color = false
+theme = "dark"

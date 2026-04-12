@@ -76,8 +76,6 @@ The README is wired to the final screenshot paths. You can add the actual image 
 
 ![Cancel Preview](docs/screenshots/cancel-preview.png)
 
-Screenshot capture notes are maintained in [docs/screenshots/SHOTLIST.md](docs/screenshots/SHOTLIST.md).
-
 ## Views
 
 ### Overview

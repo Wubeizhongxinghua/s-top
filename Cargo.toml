@@ -1,7 +1,25 @@
 [package]
 name = "s-top"
-version = "0.1.0"
+version = "0.1.4"
 edition = "2024"
+description = "Interactive terminal monitor for Slurm clusters"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Wubeizhongxinghua/s-top"
+homepage = "https://github.com/Wubeizhongxinghua/s-top"
+keywords = ["slurm", "tui", "hpc", "cluster", "monitoring"]
+categories = ["command-line-utilities"]
+include = [
+  "src/**/*",
+  "Cargo.toml",
+  "Cargo.lock",
+  "README.md",
+  "README.zh-CN.md",
+  "LICENSE",
+  "config.example.toml",
+  "docs/screenshots/*.png",
+  "docs/screenshots/SHOTLIST.md",
+]
 
 [dependencies]
 anyhow = "1.0"

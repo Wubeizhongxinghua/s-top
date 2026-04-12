@@ -58,7 +58,7 @@ jobs:
           PKG="s-top-${VERSION}-${{ matrix.label }}"
           mkdir -p "dist/${PKG}"
           cp "target/${{ matrix.target }}/release/s-top" "dist/${PKG}/s-top"
-          cp README.md README.zh-CN.md config.example.toml "dist/${PKG}/"
+          cp README.md README.zh-CN.md LICENSE config.example.toml "dist/${PKG}/"
           tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}"
           echo "asset_path=dist/${PKG}.tar.gz" >> "$GITHUB_OUTPUT"
           echo "asset_name=${PKG}.tar.gz" >> "$GITHUB_OUTPUT"
@@ -75,7 +75,7 @@ jobs:
           $pkg = "s-top-$version-${{ matrix.label }}"
           New-Item -ItemType Directory -Path "dist/$pkg" -Force | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/s-top.exe" "dist/$pkg/s-top.exe"
-          Copy-Item README.md, README.zh-CN.md, config.example.toml "dist/$pkg/"
+          Copy-Item README.md, README.zh-CN.md, LICENSE, config.example.toml "dist/$pkg/"
           Compress-Archive -Path "dist/$pkg/*" -DestinationPath "dist/$pkg.zip" -Force
           "asset_path=dist/$pkg.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "asset_name=$pkg.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append

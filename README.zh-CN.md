@@ -129,6 +129,22 @@ cargo build --release
 cargo install --path .
 ```
 
+### 从 crates.io 安装
+
+在 crate 发布到 crates.io 后，可以直接执行：
+
+```bash
+cargo install s-top
+```
+
+### 通过 conda 安装
+
+在 conda 包发布到项目 channel 后，可以直接执行：
+
+```bash
+conda install -c wubeizhongxinghua s-top
+```
+
 ### 预编译二进制
 
 GitHub Release 会提供以下平台的预编译压缩包：
@@ -144,6 +160,12 @@ GitHub Release 会提供以下平台的预编译压缩包：
 - `README.md`
 - `README.zh-CN.md`
 - `config.example.toml`
+
+仓库还提供了以下自动化发布能力：
+
+- 发布 Rust crate 到 crates.io
+- 基于 `recipe/` 构建 Linux `conda` 包
+- 在配置 token 后自动上传 conda 包到 Anaconda.org
 
 ## 使用方法
 
@@ -247,6 +269,8 @@ GitHub Release 会提供以下平台的预编译压缩包：
 | `src/ui/` | 视图渲染、主题、组件、鼠标命中逻辑 |
 | `src/cli.rs` | 命令行参数与当前用户识别 |
 | `src/config.rs` | 可选配置支持 |
+| `recipe/` | conda recipe 与构建脚本 |
+| `.github/workflows/` | Release 打包与注册表发布自动化 |
 | `config.example.toml` | 示例配置文件 |
 
 ## 限制与注意事项
@@ -255,7 +279,7 @@ GitHub Release 会提供以下平台的预编译压缩包：
 - 对于可投递到多个分区的 pending 任务，分区级 pending 聚合可能出现重复计数
 - 终端宽度较小时，宽表格仍需通过水平移动查看全部列
 - 趋势图依赖终端字体对 Unicode 符号的支持
-- 当前仓库尚未包含 `LICENSE` 文件
+- 当前 conda 打包流程首先覆盖 Linux `x86_64`；如有需要，可以继续扩展到其他 conda 平台
 
 ## 开发与检查
 
@@ -265,8 +289,14 @@ GitHub Release 会提供以下平台的预编译压缩包：
 cargo fmt
 cargo test
 cargo build --release
+cargo publish --dry-run
 ```
+
+如果希望通过 CI 自动发布，请先在仓库 Secrets 中配置：
+
+- `CARGO_REGISTRY_TOKEN`：用于 crates.io 发布
+- `ANACONDA_API_TOKEN`：用于上传到 Anaconda.org
 
 ## License
 
-仓库当前尚未提供许可证文件。如果要作为公开开源项目长期发布，建议尽快补充许可证。
+本项目采用 MIT 许可证，详见 [LICENSE](LICENSE)。

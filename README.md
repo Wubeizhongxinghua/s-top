@@ -129,6 +129,22 @@ cargo build --release
 cargo install --path .
 ```
 
+### Install from crates.io
+
+After the crate has been published to crates.io:
+
+```bash
+cargo install s-top
+```
+
+### Install with conda
+
+After the conda package has been published to the project channel:
+
+```bash
+conda install -c wubeizhongxinghua s-top
+```
+
 ### Prebuilt Binaries
 
 GitHub Releases publish prebuilt archives for:
@@ -144,6 +160,12 @@ Each release archive contains:
 - `README.md`
 - `README.zh-CN.md`
 - `config.example.toml`
+
+The repository also includes automation for:
+
+- publishing the Rust crate to crates.io
+- building a Linux `conda` package from `recipe/`
+- uploading the conda artifact to Anaconda.org when a token is configured
 
 ## Usage
 
@@ -247,6 +269,8 @@ Parsing rules are intentionally conservative:
 | `src/ui/` | Rendering, theme definitions, view composition, mouse hit testing |
 | `src/cli.rs` | CLI parsing and current-user resolution |
 | `src/config.rs` | Optional configuration support |
+| `recipe/` | Conda recipe and build scripts |
+| `.github/workflows/` | Release packaging and registry publishing automation |
 | `config.example.toml` | Example configuration |
 
 ## Limitations
@@ -255,7 +279,7 @@ Parsing rules are intentionally conservative:
 - Pending jobs eligible for multiple partitions may appear in more than one partition-level pending aggregation
 - Narrow terminals still require horizontal navigation on wide tables
 - Trend rendering depends on terminal font support for Unicode symbols
-- The repository does not currently include a `LICENSE` file
+- Conda packaging is currently prepared for Linux `x86_64`; additional conda targets can be added later if needed
 
 ## Development
 
@@ -265,8 +289,14 @@ Recommended local checks:
 cargo fmt
 cargo test
 cargo build --release
+cargo publish --dry-run
 ```
+
+If you intend to publish through CI, configure these repository secrets first:
+
+- `CARGO_REGISTRY_TOKEN` for crates.io publishing
+- `ANACONDA_API_TOKEN` for Anaconda.org uploads
 
 ## License
 
-No license file is included in the repository yet. Add one before distributing the project as a public open-source package.
+This project is distributed under the MIT license. See [LICENSE](LICENSE).

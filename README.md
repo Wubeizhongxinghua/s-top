@@ -40,10 +40,6 @@ The implementation assumes a typical HPC user environment:
 - Conservative single-job and bulk `scancel` workflows
 - Mouse support for tabs, rows, headers, modal actions, and basic navigation
 
-## Screenshots
-
-The README is wired to the final screenshot paths. You can add the actual image files under `docs/screenshots/` without changing the document structure.
-
 ### Overview
 
 ![Overview](docs/screenshots/overview-hero.png)

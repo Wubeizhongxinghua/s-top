@@ -51,7 +51,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &AppState, theme: &Theme) {
     let (status, status_style) = app.status_badge(theme);
     let lines = vec![
         Line::from(vec![
-            Span::styled("s-top", theme.title.add_modifier(Modifier::BOLD)),
+            Span::styled("sqtop", theme.title.add_modifier(Modifier::BOLD)),
             Span::raw("  "),
             badge_span(status.to_ascii_uppercase(), status_style),
             Span::raw(format!(

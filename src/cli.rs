@@ -59,7 +59,7 @@ impl HistoryWindow {
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "s-top",
+    name = "sqtop",
     version,
     about = "Interactive Slurm partition and queue monitor"
 )]

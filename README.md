@@ -1,4 +1,4 @@
-# s-top
+# sqtop
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
@@ -7,7 +7,9 @@
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%2F%20Slurm-2f855a)
 ![Data Path](https://img.shields.io/badge/Data%20Path-text%20Slurm%20commands-805ad5)
 
-`s-top` is a terminal monitor for Slurm clusters. It is designed for ordinary cluster users who need a readable, continuously refreshed view of partitions, queues, users, and jobs without relying on `slurmrestd` or Slurm JSON output.
+`sqtop` is a terminal monitor for Slurm clusters. It is designed for ordinary cluster users who need a readable, continuously refreshed view of partitions, queues, users, and jobs without relying on `slurmrestd` or Slurm JSON output.
+
+The project was previously published as `s-top`. The executable, crate, and conda package name are now `sqtop`.
 
 ![Overview](docs/screenshots/overview-hero.png)
 
@@ -127,14 +129,21 @@ cargo install --path .
 
 
 ```bash
-cargo install s-top
+cargo install sqtop
 ```
 
 ### Install with conda
 
 
 ```bash
-conda install -c wubeizhongxinghua s-top
+conda install -c wubeizhongxinghua sqtop
+```
+
+If you want `conda install sqtop` to work without `-c`, add the channel once:
+
+```bash
+conda config --add channels wubeizhongxinghua
+conda install sqtop
 ```
 
 ## Usage
@@ -142,15 +151,15 @@ conda install -c wubeizhongxinghua s-top
 ### Run
 
 ```bash
-./target/release/s-top
+./target/release/sqtop
 ```
 
 ### Common Options
 
 ```bash
-./target/release/s-top --interval 2
-./target/release/s-top --once
-./target/release/s-top --debug-dump
+./target/release/sqtop --interval 2
+./target/release/sqtop --once
+./target/release/sqtop --debug-dump
 ```
 
 ### CLI Options

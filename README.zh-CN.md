@@ -1,4 +1,4 @@
-# s-top
+# sqtop
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
@@ -7,13 +7,15 @@
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%2F%20Slurm-2f855a)
 ![Data Path](https://img.shields.io/badge/Data%20Path-text%20Slurm%20commands-805ad5)
 
-`s-top` 是一个面向 Slurm 集群的终端监控工具。它关注的是调度与队列视角，而不是底层硬件遥测。项目设计目标是在普通 HPC 用户环境中，提供持续刷新、结构清晰、可交互的集群状态视图。
+`sqtop` 是一个面向 Slurm 集群的终端监控工具。它关注的是调度与队列视角，而不是底层硬件遥测。项目设计目标是在普通 HPC 用户环境中，提供持续刷新、结构清晰、可交互的集群状态视图。
 
 ![Overview](docs/screenshots/overview-hero.png)
 
 ## 项目简介
 
-`s-top` 主要回答以下问题：
+项目此前以 `s-top` 名义发布；当前二进制、crate 和 conda 包名称均为 `sqtop`。
+
+`sqtop` 主要回答以下问题：
 
 - 哪些分区当前最紧张
 - 当前用户与其他用户分别占用了多少资源
@@ -128,13 +130,20 @@ cargo install --path .
 ### 从 crates.io 安装
 
 ```bash
-cargo install s-top
+cargo install sqtop
 ```
 
 ### 通过 conda 安装
 
 ```bash
-conda install -c wubeizhongxinghua s-top
+conda install -c wubeizhongxinghua sqtop
+```
+
+如果你希望后续直接执行 `conda install sqtop`，可以先把 channel 加入本地配置：
+
+```bash
+conda config --add channels wubeizhongxinghua
+conda install sqtop
 ```
 
 ## 使用方法
@@ -142,15 +151,15 @@ conda install -c wubeizhongxinghua s-top
 ### 启动
 
 ```bash
-./target/release/s-top
+./target/release/sqtop
 ```
 
 ### 常用方式
 
 ```bash
-./target/release/s-top --interval 2
-./target/release/s-top --once
-./target/release/s-top --debug-dump
+./target/release/sqtop --interval 2
+./target/release/sqtop --once
+./target/release/sqtop --debug-dump
 ```
 
 ### 命令行参数

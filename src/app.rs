@@ -2457,7 +2457,7 @@ pub fn print_debug_dump(dump: &DebugDump) -> Result<()> {
 
 pub fn print_once_summary(snapshot: &ClusterSnapshot) {
     println!(
-        "s-top summary | host {} | user {} | sampled {} ms | degraded {}",
+        "sqtop summary | host {} | user {} | sampled {} ms | degraded {}",
         snapshot.hostname, snapshot.current_user, snapshot.sample_duration_ms, snapshot.degraded
     );
     println!("partitions:");

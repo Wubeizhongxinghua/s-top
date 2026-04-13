@@ -1,7 +1,7 @@
-{% set version = environ.get("ST_VERSION", "0.1.7") %}
+{% set version = environ.get("ST_VERSION", "0.1.8") %}
 
 package:
-  name: s-top
+  name: sqtop
   version: {{ version }}
 
 source:
@@ -12,13 +12,12 @@ build:
 
 requirements:
   build:
-    - {{ compiler('c') }}
     - {{ compiler('rust') }}
     - {{ stdlib('c') }}
 
 test:
   commands:
-    - s-top --help
+    - sqtop --help
 
 about:
   home: https://github.com/Wubeizhongxinghua/s-top

@@ -21,7 +21,7 @@ pub struct FileConfig {
 
 impl FileConfig {
     pub fn load() -> Result<Option<Self>> {
-        let Some(path) = config_path() else {
+        let Some(path) = preferred_existing_config_path() else {
             return Ok(None);
         };
 
@@ -38,5 +38,23 @@ impl FileConfig {
 }
 
 fn config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|path| path.join("sqtop").join("config.toml"))
+}
+
+fn legacy_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|path| path.join("s-top").join("config.toml"))
+}
+
+fn preferred_existing_config_path() -> Option<PathBuf> {
+    let current = config_path()?;
+    if current.exists() {
+        return Some(current);
+    }
+
+    let legacy = legacy_config_path()?;
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    Some(current)
 }

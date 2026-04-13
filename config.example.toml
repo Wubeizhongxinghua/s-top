@@ -1,5 +1,5 @@
 interval = 2.0
-user = "myli"
+user = "your-user-name"
 all_jobs_enabled = true
 start_in_all_jobs = false
 history_window = "24h"

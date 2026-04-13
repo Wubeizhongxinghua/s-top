@@ -16,6 +16,10 @@ pub struct Theme {
     pub muted: Style,
     pub highlight: Style,
     pub title: Style,
+    pub detail_frame: Style,
+    pub cancel_frame: Style,
+    pub result_success: Style,
+    pub result_failure: Style,
     partition_palette: Vec<Color>,
 }
 
@@ -35,6 +39,10 @@ impl Theme {
                 muted: Style::default(),
                 highlight: Style::default(),
                 title: Style::default(),
+                detail_frame: Style::default(),
+                cancel_frame: Style::default(),
+                result_success: Style::default(),
+                result_failure: Style::default(),
                 partition_palette: vec![Color::Reset],
             };
         }
@@ -53,6 +61,10 @@ impl Theme {
                 muted: Style::default().fg(Color::Gray),
                 highlight: Style::default().bg(Color::Rgb(28, 54, 72)),
                 title: Style::default().fg(Color::LightCyan),
+                detail_frame: Style::default().fg(Color::LightCyan),
+                cancel_frame: Style::default().fg(Color::LightRed),
+                result_success: Style::default().fg(Color::LightGreen),
+                result_failure: Style::default().fg(Color::LightRed),
                 partition_palette: vec![
                     Color::LightBlue,
                     Color::LightCyan,
@@ -69,7 +81,7 @@ impl Theme {
             ThemeChoice::Light => Self {
                 accent: Style::default().fg(Color::Blue),
                 mine: Style::default().fg(Color::Blue),
-                other: Style::default().fg(Color::DarkGray),
+                other: Style::default().fg(Color::Yellow),
                 running: Style::default().fg(Color::Green),
                 pending: Style::default().fg(Color::Magenta),
                 running_pending_overlap: Style::default().fg(Color::Red),
@@ -79,6 +91,10 @@ impl Theme {
                 muted: Style::default().fg(Color::DarkGray),
                 highlight: Style::default().bg(Color::Rgb(215, 229, 240)),
                 title: Style::default().fg(Color::Blue),
+                detail_frame: Style::default().fg(Color::Blue),
+                cancel_frame: Style::default().fg(Color::Red),
+                result_success: Style::default().fg(Color::Green),
+                result_failure: Style::default().fg(Color::Red),
                 partition_palette: vec![
                     Color::Blue,
                     Color::Cyan,

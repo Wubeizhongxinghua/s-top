@@ -36,6 +36,7 @@ pub(crate) enum Page {
     Overview,
     MyJobs,
     Users,
+    UserJobs,
     AllJobs,
     PartitionDetail,
     NodeDetail,
@@ -47,6 +48,7 @@ impl Page {
             Self::Overview => "Overview",
             Self::MyJobs => "My Jobs",
             Self::Users => "Users",
+            Self::UserJobs => "User Jobs",
             Self::AllJobs => "All Jobs",
             Self::PartitionDetail => "Partition Detail",
             Self::NodeDetail => "Node Detail",
@@ -74,6 +76,7 @@ pub(crate) enum RowKind {
     Overview,
     MyJobs,
     Users,
+    UserJobs,
     AllJobs,
     PartitionJobs,
     PartitionNodes,
@@ -151,11 +154,20 @@ pub(crate) enum MouseHit {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UiHitMap {
     hits: Vec<(Rect, MouseHit)>,
+    page_rows: usize,
 }
 
 impl UiHitMap {
     pub fn push(&mut self, rect: Rect, hit: MouseHit) {
         self.hits.push((rect, hit));
+    }
+
+    pub fn set_page_rows(&mut self, page_rows: usize) {
+        self.page_rows = self.page_rows.max(page_rows);
+    }
+
+    pub fn page_rows(&self) -> usize {
+        self.page_rows
     }
 
     pub fn hit_test(&self, column: u16, row: u16) -> Option<MouseHit> {
@@ -560,6 +572,10 @@ pub(crate) struct CancelCandidate {
     pub user: String,
     pub partition: String,
     pub state: String,
+    pub nodes: u32,
+    pub req_tres: Option<String>,
+    pub alloc_tres: Option<String>,
+    pub placement_or_reason: String,
     pub allowed: bool,
     pub reason: Option<String>,
 }
@@ -702,12 +718,14 @@ pub(crate) struct AppState {
     pub selected_overview: usize,
     pub selected_my_jobs: usize,
     pub selected_users: usize,
+    pub selected_user_jobs: usize,
     pub selected_all_jobs: usize,
     pub selected_partition_jobs: usize,
     pub selected_partition_node: usize,
     pub selected_history: usize,
     current_main_index: usize,
     detail_partition: Option<String>,
+    detail_user: Option<String>,
     node_detail: Option<NodeDetailState>,
     pub job_horizontal_offset: usize,
     pub(crate) overview_sort: OverviewSortState,
@@ -725,6 +743,9 @@ pub(crate) struct AppState {
     quit: bool,
     last_click: Option<(MouseHit, Instant)>,
     status_message: Option<String>,
+    current_page_rows: usize,
+    modal_scroll: usize,
+    modal_revision: u64,
 }
 
 impl AppState {
@@ -767,6 +788,7 @@ impl AppState {
             hit_map: UiHitMap::default(),
             current_main_index,
             detail_partition: None,
+            detail_user: None,
             node_detail: None,
             job_horizontal_offset: 0,
             overview_sort: OverviewSortState {
@@ -778,7 +800,7 @@ impl AppState {
                 direction: SortDirection::Desc,
             },
             user_sort: UserSortState {
-                column: UserColumn::RunningJobs,
+                column: UserColumn::TotalJobs,
                 direction: SortDirection::Desc,
             },
             job_filter: JobFilter::Active,
@@ -788,6 +810,7 @@ impl AppState {
             selected_overview: 0,
             selected_my_jobs: 0,
             selected_users: 0,
+            selected_user_jobs: 0,
             selected_all_jobs: 0,
             selected_partition_jobs: 0,
             selected_partition_node: 0,
@@ -800,10 +823,14 @@ impl AppState {
             quit: false,
             last_click: None,
             status_message: None,
+            current_page_rows: 1,
+            modal_scroll: 0,
+            modal_revision: 0,
         }
     }
 
     pub(crate) fn set_hit_map(&mut self, hit_map: UiHitMap) {
+        self.current_page_rows = hit_map.page_rows().max(1);
         self.hit_map = hit_map;
     }
 
@@ -812,6 +839,8 @@ impl AppState {
             Page::NodeDetail
         } else if self.detail_partition.is_some() {
             Page::PartitionDetail
+        } else if self.detail_user.is_some() {
+            Page::UserJobs
         } else {
             self.page_tabs()[self.current_main_index]
         }
@@ -828,9 +857,11 @@ impl AppState {
     pub(crate) fn sort_label(&self) -> String {
         match self.current_page() {
             Page::Overview => self.overview_sort.label(),
-            Page::MyJobs | Page::AllJobs | Page::PartitionDetail | Page::NodeDetail => {
-                self.job_sort.label()
-            }
+            Page::MyJobs
+            | Page::UserJobs
+            | Page::AllJobs
+            | Page::PartitionDetail
+            | Page::NodeDetail => self.job_sort.label(),
             Page::Users => self.user_sort.label(),
         }
     }
@@ -855,6 +886,11 @@ impl AppState {
                     "All".to_string()
                 }
             }
+            Page::UserJobs => format!(
+                "User: {} | State filter: {}",
+                self.detail_user.as_deref().unwrap_or("N/A"),
+                self.job_filter.label()
+            ),
             _ => self.job_filter.label().to_string(),
         }
     }
@@ -962,8 +998,21 @@ impl AppState {
         self.visible_users().get(self.selected_users).cloned()
     }
 
+    pub(crate) fn detail_user_name(&self) -> Option<&str> {
+        self.detail_user.as_deref()
+    }
+
     pub(crate) fn visible_selected_user_jobs(&self) -> Vec<&JobRecord> {
         let Some(selected_user) = self.selected_user_usage().map(|usage| usage.user) else {
+            return Vec::new();
+        };
+        let mut jobs = self.collect_jobs(false, false);
+        jobs.retain(|job| job.user == selected_user);
+        jobs
+    }
+
+    pub(crate) fn visible_detail_user_jobs(&self) -> Vec<&JobRecord> {
+        let Some(selected_user) = self.detail_user_name() else {
             return Vec::new();
         };
         let mut jobs = self.collect_jobs(false, false);
@@ -1120,6 +1169,34 @@ impl AppState {
         } else {
             &self.search_query
         }
+    }
+
+    pub(crate) fn job_filter_label(&self) -> &'static str {
+        self.job_filter.label()
+    }
+
+    pub(crate) fn modal_scroll(&self) -> usize {
+        self.modal_scroll
+    }
+
+    pub(crate) fn modal_revision(&self) -> u64 {
+        self.modal_revision
+    }
+
+    fn set_modal(&mut self, modal: Modal) {
+        self.modal = Some(modal);
+        self.modal_revision = self.modal_revision.wrapping_add(1);
+    }
+
+    fn clear_modal(&mut self) {
+        if self.modal.is_some() {
+            self.modal = None;
+            self.modal_revision = self.modal_revision.wrapping_add(1);
+        }
+    }
+
+    fn touch_modal(&mut self) {
+        self.modal_revision = self.modal_revision.wrapping_add(1);
     }
 
     pub(crate) fn active_node_where_filter(&self) -> &str {
@@ -1318,6 +1395,9 @@ impl AppState {
         self.selected_users = self
             .selected_users
             .min(self.visible_users().len().saturating_sub(1));
+        self.selected_user_jobs = self
+            .selected_user_jobs
+            .min(self.visible_detail_user_jobs().len().saturating_sub(1));
         self.selected_all_jobs = self
             .selected_all_jobs
             .min(self.visible_all_jobs().len().saturating_sub(1));
@@ -1376,6 +1456,7 @@ impl AppState {
                         modal.loading = false;
                         modal.detail = detail;
                         modal.error = error;
+                        self.touch_modal();
                     }
                 }
                 AsyncEvent::NodeLoaded {
@@ -1401,7 +1482,8 @@ impl AppState {
                         report.succeeded(),
                         report.failed()
                     ));
-                    self.modal = Some(Modal::CancelResult(report));
+                    self.modal_scroll = 0;
+                    self.set_modal(Modal::CancelResult(report));
                     let _ = self.refresh_tx.send(RefreshCommand::RefreshNow);
                 }
             }
@@ -1470,7 +1552,8 @@ impl AppState {
     }
 
     fn request_job_detail(&mut self, job_id: String) {
-        self.modal = Some(Modal::JobDetail(JobDetailModal {
+        self.modal_scroll = 0;
+        self.set_modal(Modal::JobDetail(JobDetailModal {
             job_id: job_id.clone(),
             loading: true,
             detail: None,
@@ -1570,6 +1653,22 @@ impl AppState {
         });
     }
 
+    fn scroll_modal(&mut self, delta: isize) {
+        if delta >= 0 {
+            self.modal_scroll = self.modal_scroll.saturating_add(delta as usize);
+        } else {
+            self.modal_scroll = self.modal_scroll.saturating_sub(delta.unsigned_abs());
+        }
+    }
+
+    fn scroll_modal_to_top(&mut self) {
+        self.modal_scroll = 0;
+    }
+
+    fn scroll_modal_to_bottom(&mut self) {
+        self.modal_scroll = usize::MAX / 4;
+    }
+
     fn handle_key(&mut self, key: KeyEvent) {
         if self.input_mode != InputMode::Normal {
             self.handle_search_input(key);
@@ -1577,59 +1676,71 @@ impl AppState {
         }
 
         if let Some(modal) = &self.modal {
+            let page_step = self.current_page_rows.max(1) as isize;
             match modal {
                 Modal::Help => match key.code {
-                    KeyCode::Char('h') | KeyCode::Esc | KeyCode::Enter | KeyCode::Char('b') => {
-                        self.modal = None
+                    KeyCode::Char('h') | KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                        self.clear_modal()
                     }
+                    KeyCode::Down | KeyCode::Char('j') => self.scroll_modal(1),
+                    KeyCode::Up | KeyCode::Char('k') => self.scroll_modal(-1),
+                    KeyCode::Char(' ') => self.scroll_modal(page_step),
+                    KeyCode::Char('b') => self.scroll_modal(-page_step),
+                    KeyCode::Char('g') => self.scroll_modal_to_top(),
+                    KeyCode::Char('G') => self.scroll_modal_to_bottom(),
                     _ => {}
                 },
                 Modal::JobDetail(_) | Modal::CancelResult(_) => match key.code {
-                    KeyCode::Esc
-                    | KeyCode::Enter
-                    | KeyCode::Char('b')
-                    | KeyCode::Char('q')
-                    | KeyCode::Char('i') => self.modal = None,
+                    KeyCode::Esc | KeyCode::Char('q') => self.clear_modal(),
+                    KeyCode::Down | KeyCode::Char('j') => self.scroll_modal(1),
+                    KeyCode::Up | KeyCode::Char('k') => self.scroll_modal(-1),
+                    KeyCode::Char(' ') => self.scroll_modal(page_step),
+                    KeyCode::Char('b') => self.scroll_modal(-page_step),
+                    KeyCode::Char('g') => self.scroll_modal_to_top(),
+                    KeyCode::Char('G') => self.scroll_modal_to_bottom(),
                     _ => {}
                 },
                 Modal::ConfirmCancel(preview) => match key.code {
-                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('b') => self.modal = None,
+                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => self.clear_modal(),
                     KeyCode::Enter | KeyCode::Char('y') => {
                         let preview = preview.clone();
-                        self.modal = None;
+                        self.clear_modal();
                         self.request_cancel(preview);
                     }
+                    KeyCode::Down | KeyCode::Char('j') => self.scroll_modal(1),
+                    KeyCode::Up | KeyCode::Char('k') => self.scroll_modal(-1),
+                    KeyCode::Char(' ') => self.scroll_modal(page_step),
+                    KeyCode::Char('b') => self.scroll_modal(-page_step),
+                    KeyCode::Char('g') => self.scroll_modal_to_top(),
+                    KeyCode::Char('G') => self.scroll_modal_to_bottom(),
                     _ => {}
                 },
             }
             return;
         }
 
+        let page_step = self.current_page_rows.max(1) as isize;
         match key.code {
-            KeyCode::Char('q') => self.quit = true,
-            KeyCode::Char('h') => self.modal = Some(Modal::Help),
-            KeyCode::Esc | KeyCode::Char('b') => {
-                if self.node_detail.is_some() {
-                    self.node_detail = None;
-                } else if self.detail_partition.is_some() {
-                    self.detail_partition = None;
-                } else if matches!(
-                    self.current_page(),
-                    Page::MyJobs | Page::AllJobs | Page::Users
-                ) {
-                    self.current_main_index = 0;
+            KeyCode::Char('q') => self.navigate_back_or_quit(),
+            KeyCode::Char('h') => self.set_modal(Modal::Help),
+            KeyCode::Esc => {
+                if self.is_detail_page() {
+                    self.navigate_back_or_quit();
                 }
             }
             KeyCode::Tab => self.next_page(),
             KeyCode::BackTab => self.prev_page(),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
+            KeyCode::Char(' ') => self.move_selection(page_step),
+            KeyCode::Char('b') => self.move_selection(-page_step),
             KeyCode::Left => {
                 if matches!(
                     self.current_page(),
                     Page::Overview
                         | Page::MyJobs
                         | Page::Users
+                        | Page::UserJobs
                         | Page::AllJobs
                         | Page::PartitionDetail
                         | Page::NodeDetail
@@ -1643,6 +1754,7 @@ impl AppState {
                     Page::Overview
                         | Page::MyJobs
                         | Page::Users
+                        | Page::UserJobs
                         | Page::AllJobs
                         | Page::PartitionDetail
                         | Page::NodeDetail
@@ -1659,9 +1771,11 @@ impl AppState {
             KeyCode::Char('s') => {
                 match self.current_page() {
                     Page::Overview => self.overview_sort = self.overview_sort.cycle(),
-                    Page::MyJobs | Page::AllJobs | Page::PartitionDetail | Page::NodeDetail => {
-                        self.job_sort = self.job_sort.cycle()
-                    }
+                    Page::MyJobs
+                    | Page::UserJobs
+                    | Page::AllJobs
+                    | Page::PartitionDetail
+                    | Page::NodeDetail => self.job_sort = self.job_sort.cycle(),
                     Page::Users => self.user_sort = self.user_sort.cycle(),
                 }
                 self.clamp_selections();
@@ -1673,7 +1787,7 @@ impl AppState {
             KeyCode::Char('f') => {
                 match self.current_page() {
                     Page::NodeDetail => self.cycle_node_state_filter(),
-                    Page::MyJobs | Page::AllJobs | Page::PartitionDetail => {
+                    Page::MyJobs | Page::UserJobs | Page::AllJobs | Page::PartitionDetail => {
                         self.job_filter = self.job_filter.next()
                     }
                     Page::Overview | Page::Users => {}
@@ -1826,8 +1940,20 @@ impl AppState {
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
         match mouse.kind {
-            MouseEventKind::ScrollDown => self.move_selection(1),
-            MouseEventKind::ScrollUp => self.move_selection(-1),
+            MouseEventKind::ScrollDown => {
+                if self.modal.is_some() {
+                    self.scroll_modal(3);
+                } else {
+                    self.move_selection(1)
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if self.modal.is_some() {
+                    self.scroll_modal(-3);
+                } else {
+                    self.move_selection(-1)
+                }
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(hit) = self.hit_map.hit_test(mouse.column, mouse.row) {
                     let now = Instant::now();
@@ -1845,8 +1971,7 @@ impl AppState {
     fn apply_mouse_hit(&mut self, hit: MouseHit, activate: bool) {
         match hit {
             MouseHit::Tab(page) => {
-                self.node_detail = None;
-                self.detail_partition = None;
+                self.clear_detail_pages();
                 if let Some(index) = self
                     .page_tabs()
                     .iter()
@@ -1860,6 +1985,7 @@ impl AppState {
                     RowKind::Overview => self.selected_overview = index,
                     RowKind::MyJobs => self.selected_my_jobs = index,
                     RowKind::Users => self.selected_users = index,
+                    RowKind::UserJobs => self.selected_user_jobs = index,
                     RowKind::AllJobs => self.selected_all_jobs = index,
                     RowKind::PartitionJobs => self.selected_partition_jobs = index,
                     RowKind::PartitionNodes => self.selected_partition_node = index,
@@ -1875,11 +2001,12 @@ impl AppState {
                         RowKind::Overview => self.open_primary_detail(),
                         RowKind::PartitionNodes => self.open_selected_node(),
                         RowKind::MyJobs
+                        | RowKind::UserJobs
                         | RowKind::AllJobs
                         | RowKind::PartitionJobs
                         | RowKind::NodeJobs
                         | RowKind::History => self.open_job_detail_from_selection(),
-                        RowKind::Users => {}
+                        RowKind::Users => self.open_primary_detail(),
                     }
                 }
             }
@@ -1898,13 +2025,13 @@ impl AppState {
             MouseHit::Footer(action) => self.trigger_footer_action(action),
             MouseHit::Modal(action) => match action {
                 ModalAction::Ignore => {}
-                ModalAction::Close | ModalAction::Cancel => self.modal = None,
+                ModalAction::Close | ModalAction::Cancel => self.clear_modal(),
                 ModalAction::Confirm => {
                     if let Some(Modal::ConfirmCancel(preview)) = self.modal.clone() {
-                        self.modal = None;
+                        self.clear_modal();
                         self.request_cancel(preview);
                     } else {
-                        self.modal = None;
+                        self.clear_modal();
                     }
                 }
             },
@@ -1913,18 +2040,23 @@ impl AppState {
 
     fn trigger_footer_action(&mut self, action: FooterAction) {
         match action {
-            FooterAction::BackOverview => {
-                self.node_detail = None;
-                self.detail_partition = None;
-                self.current_main_index = 0;
-            }
+            FooterAction::BackOverview => match self.current_page() {
+                Page::MyJobs | Page::AllJobs => {
+                    self.clear_detail_pages();
+                    self.current_main_index = 0;
+                }
+                Page::PartitionDetail | Page::NodeDetail | Page::UserJobs => {
+                    self.navigate_back_or_quit();
+                }
+                _ => {}
+            },
             FooterAction::Refresh => {
                 let _ = self.refresh_tx.send(RefreshCommand::RefreshNow);
                 if self.node_detail.is_some() {
                     self.request_node_refresh();
                 }
             }
-            FooterAction::Help => self.modal = Some(Modal::Help),
+            FooterAction::Help => self.set_modal(Modal::Help),
             FooterAction::ToggleMine => {
                 if self.current_page() != Page::MyJobs {
                     self.show_only_mine = !self.show_only_mine;
@@ -1939,17 +2071,13 @@ impl AppState {
     }
 
     fn next_page(&mut self) {
-        if self.detail_partition.is_some() || self.node_detail.is_some() {
-            return;
-        }
+        self.clear_detail_pages();
         let len = self.page_tabs().len();
         self.current_main_index = (self.current_main_index + 1) % len;
     }
 
     fn prev_page(&mut self) {
-        if self.detail_partition.is_some() || self.node_detail.is_some() {
-            return;
-        }
+        self.clear_detail_pages();
         let len = self.page_tabs().len();
         self.current_main_index = (self.current_main_index + len - 1) % len;
     }
@@ -1959,6 +2087,7 @@ impl AppState {
             Page::Overview => self.visible_partitions().len(),
             Page::MyJobs => self.visible_my_jobs().len(),
             Page::Users => self.visible_users().len(),
+            Page::UserJobs => self.visible_detail_user_jobs().len(),
             Page::AllJobs => self.visible_all_jobs().len(),
             Page::PartitionDetail => self
                 .visible_partition_jobs(self.detail_partition.as_deref().unwrap_or(""))
@@ -1974,6 +2103,7 @@ impl AppState {
             Page::Overview => &mut self.selected_overview,
             Page::MyJobs => &mut self.selected_my_jobs,
             Page::Users => &mut self.selected_users,
+            Page::UserJobs => &mut self.selected_user_jobs,
             Page::AllJobs => &mut self.selected_all_jobs,
             Page::PartitionDetail => &mut self.selected_partition_jobs,
             Page::NodeDetail => {
@@ -1999,10 +2129,17 @@ impl AppState {
                     self.selected_partition_node = 0;
                 }
             }
-            Page::Users => {}
-            Page::PartitionDetail | Page::MyJobs | Page::AllJobs | Page::NodeDetail => {
-                self.open_job_detail_from_selection()
+            Page::Users => {
+                if let Some(user) = self.selected_user_usage().map(|usage| usage.user) {
+                    self.detail_user = Some(user);
+                    self.selected_user_jobs = 0;
+                }
             }
+            Page::UserJobs
+            | Page::PartitionDetail
+            | Page::MyJobs
+            | Page::AllJobs
+            | Page::NodeDetail => self.open_job_detail_from_selection(),
         }
     }
 
@@ -2024,12 +2161,14 @@ impl AppState {
             title: format!("Cancel job {}", job.job_id),
             candidates: vec![build_cancel_candidate(job, &self.settings.user)],
         };
-        self.modal = Some(Modal::ConfirmCancel(preview));
+        self.modal_scroll = 0;
+        self.set_modal(Modal::ConfirmCancel(preview));
     }
 
     fn open_bulk_cancel_preview(&mut self) {
         let jobs: Vec<&JobRecord> = match self.current_page() {
             Page::MyJobs => self.visible_my_jobs(),
+            Page::UserJobs => self.visible_detail_user_jobs(),
             Page::AllJobs => self.visible_all_jobs(),
             Page::PartitionDetail => self
                 .detail_partition
@@ -2049,7 +2188,8 @@ impl AppState {
             self.status_message = Some("no visible jobs to review for cancel".to_string());
             return;
         }
-        self.modal = Some(Modal::ConfirmCancel(CancelPreview {
+        self.modal_scroll = 0;
+        self.set_modal(Modal::ConfirmCancel(CancelPreview {
             scope: CancelScope::Visible,
             title: format!("Cancel {} visible jobs", candidates.len()),
             candidates,
@@ -2068,6 +2208,10 @@ impl AppState {
                 .get(self.selected_my_jobs)
                 .map(|job| job.primary_partition()),
             Page::Users => None,
+            Page::UserJobs => self
+                .visible_detail_user_jobs()
+                .get(self.selected_user_jobs)
+                .map(|job| job.primary_partition()),
             Page::AllJobs => self
                 .visible_all_jobs()
                 .get(self.selected_all_jobs)
@@ -2083,6 +2227,10 @@ impl AppState {
         match self.current_page() {
             Page::MyJobs => self.visible_my_jobs().get(self.selected_my_jobs).copied(),
             Page::Users => None,
+            Page::UserJobs => self
+                .visible_detail_user_jobs()
+                .get(self.selected_user_jobs)
+                .copied(),
             Page::AllJobs => self.visible_all_jobs().get(self.selected_all_jobs).copied(),
             Page::PartitionDetail => self.detail_partition.as_deref().and_then(|partition| {
                 self.visible_partition_jobs(partition)
@@ -2173,13 +2321,54 @@ impl AppState {
         None
     }
 
+    fn is_detail_page(&self) -> bool {
+        matches!(
+            self.current_page(),
+            Page::PartitionDetail | Page::NodeDetail | Page::UserJobs
+        )
+    }
+
+    fn clear_detail_pages(&mut self) {
+        self.node_detail = None;
+        self.detail_partition = None;
+        self.detail_user = None;
+    }
+
+    fn navigate_back_or_quit(&mut self) {
+        if self.node_detail.is_some() {
+            self.node_detail = None;
+        } else if self.detail_partition.is_some() {
+            self.detail_partition = None;
+            self.current_main_index = self
+                .page_tabs()
+                .iter()
+                .position(|page| *page == Page::Overview)
+                .unwrap_or(0);
+        } else if self.detail_user.is_some() {
+            self.detail_user = None;
+            self.current_main_index = self
+                .page_tabs()
+                .iter()
+                .position(|page| *page == Page::Users)
+                .unwrap_or(0);
+        } else {
+            self.quit = true;
+        }
+    }
+
     pub(crate) fn footer_actions(&self) -> Vec<FooterAction> {
         let mut actions = vec![FooterAction::Refresh, FooterAction::Help];
         if self.current_page() != Page::MyJobs {
             actions.push(FooterAction::ToggleMine);
         }
         match self.current_page() {
-            Page::MyJobs | Page::AllJobs | Page::PartitionDetail => {
+            Page::MyJobs | Page::AllJobs => {
+                actions.insert(0, FooterAction::BackOverview);
+                actions.push(FooterAction::OpenDetail);
+                actions.push(FooterAction::CancelJob);
+                actions.push(FooterAction::BulkCancel);
+            }
+            Page::PartitionDetail | Page::UserJobs => {
                 actions.insert(0, FooterAction::BackOverview);
                 actions.push(FooterAction::OpenDetail);
                 actions.push(FooterAction::CancelJob);
@@ -2193,7 +2382,7 @@ impl AppState {
                 actions.push(FooterAction::ClearFilters);
             }
             Page::Overview => actions.push(FooterAction::OpenDetail),
-            Page::Users => {}
+            Page::Users => actions.push(FooterAction::OpenDetail),
         }
         if self.current_page() == Page::PartitionDetail {
             actions.push(FooterAction::OpenNode);
@@ -2446,6 +2635,10 @@ fn build_cancel_candidate(job: &JobRecord, current_user: &str) -> CancelCandidat
         user: job.user.clone(),
         partition: job.partition_raw.clone(),
         state: job.state.clone(),
+        nodes: job.nodes,
+        req_tres: job.req_tres.clone(),
+        alloc_tres: job.alloc_tres.clone(),
+        placement_or_reason: job.location_or_reason.clone(),
         allowed: cancel_denial_reason(job, current_user).is_none(),
         reason: cancel_denial_reason(job, current_user).map(ToOwned::to_owned),
     }

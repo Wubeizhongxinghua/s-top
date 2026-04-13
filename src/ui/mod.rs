@@ -1,5 +1,7 @@
 mod theme;
 
+use std::cell::RefCell;
+
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -184,6 +186,7 @@ fn render_body(
         Page::Overview => render_overview(frame, content_area, app, theme, hit_map),
         Page::MyJobs => render_jobs(frame, content_area, app, theme, hit_map, true),
         Page::Users => render_users(frame, content_area, app, theme, hit_map),
+        Page::UserJobs => render_user_jobs(frame, content_area, app, theme, hit_map),
         Page::AllJobs => render_jobs(frame, content_area, app, theme, hit_map, false),
         Page::PartitionDetail => render_partition_detail(frame, content_area, app, theme, hit_map),
         Page::NodeDetail => render_node_detail(frame, content_area, app, theme, hit_map),
@@ -320,7 +323,9 @@ fn render_overview(
         theme,
     ));
     column_widths.push(metric_width);
-    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::OthersRunning)));
+    header_hits.push(Some(MouseHit::OverviewHeader(
+        OverviewColumn::OthersRunning,
+    )));
     headers.push(sortable_header(
         "Others Pending",
         app.overview_sort.column == OverviewColumn::OthersPending,
@@ -328,7 +333,9 @@ fn render_overview(
         theme,
     ));
     column_widths.push(metric_width);
-    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::OthersPending)));
+    header_hits.push(Some(MouseHit::OverviewHeader(
+        OverviewColumn::OthersPending,
+    )));
     for segment in 0..total_segments {
         headers.push(sortable_header(
             if total_segments > 1 && segment > 0 {
@@ -357,12 +364,7 @@ fn render_overview(
         .iter()
         .zip(total_job_texts.iter().zip(resource_texts.iter()))
         .map(|(partition, (total_jobs, resources))| {
-            let pressure = pressure_bar_cell(
-                partition,
-                app.metric_mode,
-                theme,
-                pressure_bar_width,
-            );
+            let pressure = pressure_bar_cell(partition, app.metric_mode, theme, pressure_bar_width);
             let mine_running = metric_value_line(
                 partition.mine.running_total(app.metric_mode),
                 running_capacity,
@@ -461,9 +463,10 @@ fn render_overview(
         .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
         .block(
             Block::default()
-                .title(format!(
-                    "Partition Overview  Hidden left: {}  Hidden right: {}",
-                    hidden_left, hidden_right
+                .title(wide_table_title(
+                    "Partition Overview",
+                    hidden_left,
+                    hidden_right,
                 ))
                 .borders(Borders::ALL),
         )
@@ -478,12 +481,7 @@ fn render_overview(
     });
     frame.render_stateful_widget(table, sections[1], &mut state);
     register_table_rows(hit_map, sections[1], rows.len(), RowKind::Overview);
-    register_header_hits(
-        hit_map,
-        sections[1],
-        &constraints,
-        &visible_hits,
-    );
+    register_header_hits(hit_map, sections[1], &constraints, &visible_hits);
 }
 
 fn render_overview_summary(frame: &mut Frame, area: Rect, app: &AppState, theme: &Theme) {
@@ -616,7 +614,7 @@ fn render_jobs(
             toggle_badge("Mine-only view", app.show_only_mine, theme),
         ]),
         Line::from(format!(
-            "Metric: {}  Sort: {}  Current user: {}  Horizontal view: column {} (Left / Right)",
+            "Metric: {}  Sort: {}  Current user: {}  Horizontal view: column {} (← →)",
             app.metric_mode.label().to_ascii_uppercase(),
             app.sort_label(),
             app.settings.user,
@@ -644,7 +642,7 @@ fn render_jobs(
         },
         theme,
     );
-    let back_label = "← Overview (b)";
+    let back_label = "← Overview";
     frame.render_widget(
         Paragraph::new(back_label)
             .alignment(Alignment::Center)
@@ -663,7 +661,8 @@ fn render_jobs(
 
     let show_user = !mine_only;
     let resource_scale = JobResourceScale::from_jobs(&rows);
-    let resource_segment_width = adaptive_segment_width(sections[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let resource_segment_width =
+        adaptive_segment_width(sections[1].width, RESOURCE_SEGMENT_WIDTH, 12);
     let name_segment_width = adaptive_segment_width(sections[1].width, NAME_SEGMENT_WIDTH, 12);
     let resource_texts = rows
         .iter()
@@ -861,11 +860,10 @@ fn render_jobs(
         })
         .collect();
 
-    let title = format!(
-        "{}  Hidden left: {}  Hidden right: {}",
+    let title = wide_table_title(
         if mine_only { "My Jobs" } else { "All Jobs" },
         hidden_left,
-        hidden_right
+        hidden_right,
     );
     let table = Table::new(table_rows, constraints.clone())
         .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
@@ -894,6 +892,282 @@ fn render_jobs(
             RowKind::AllJobs
         },
     );
+    register_header_hits(hit_map, sections[1], &constraints, &visible_hits);
+}
+
+fn render_user_jobs(
+    frame: &mut Frame,
+    area: Rect,
+    app: &AppState,
+    theme: &Theme,
+    hit_map: &mut UiHitMap,
+) {
+    let user_name = app.detail_user_name().unwrap_or("unknown user");
+    let rows = app.visible_detail_user_jobs();
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(8)])
+        .split(area);
+    let header_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(30), Constraint::Length(18)])
+        .split(sections[0]);
+    let header_lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!("Jobs for {}", user_name),
+                theme.title.add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "  Visible jobs: {}  State filter: {}",
+                rows.len(),
+                app.job_filter_label()
+            )),
+        ]),
+        Line::from(format!(
+            "Sort: {}  Search query: {}  Horizontal view: column {} (← →)",
+            app.sort_label(),
+            if app.active_global_query().is_empty() {
+                "All jobs for this user".to_string()
+            } else {
+                app.active_global_query().to_string()
+            },
+            app.job_horizontal_offset + 1
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(header_lines)
+            .block(Block::default().borders(Borders::ALL).title("User Jobs"))
+            .wrap(Wrap { trim: true }),
+        header_layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new("← Users")
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .style(theme.accent)
+                    .title("Back"),
+            ),
+        header_layout[1],
+    );
+    hit_map.push(
+        header_layout[1],
+        MouseHit::Footer(FooterAction::BackOverview),
+    );
+
+    let resource_scale = JobResourceScale::from_jobs(&rows);
+    let resource_segment_width =
+        adaptive_segment_width(sections[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let name_segment_width = adaptive_segment_width(sections[1].width, NAME_SEGMENT_WIDTH, 12);
+    let resource_texts = rows
+        .iter()
+        .map(|job| resource_footprint_text(job, &resource_scale))
+        .collect::<Vec<_>>();
+    let resource_segments = max_segments(&resource_texts, resource_segment_width);
+    let name_segments = max_segments(
+        &rows.iter().map(|job| job.name.clone()).collect::<Vec<_>>(),
+        name_segment_width,
+    );
+    let where_width = rows
+        .iter()
+        .map(|job| job.location_or_reason.chars().count())
+        .max()
+        .unwrap_or(24)
+        .clamp(24, 72) as u16;
+    let mut headers = vec![
+        sortable_header(
+            "Job ID",
+            app.job_sort.column == JobColumn::JobId,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "Partition",
+            app.job_sort.column == JobColumn::Partition,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "State",
+            app.job_sort.column == JobColumn::State,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "Runtime",
+            app.job_sort.column == JobColumn::Runtime,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "Time limit",
+            app.job_sort.column == JobColumn::TimeLimit,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "Nodes",
+            app.job_sort.column == JobColumn::Nodes,
+            app.job_sort.direction,
+            theme,
+        ),
+        sortable_header(
+            "CPUs",
+            app.job_sort.column == JobColumn::Cpus,
+            app.job_sort.direction,
+            theme,
+        ),
+    ];
+    let mut column_widths = vec![8, 11, 11, 9, 10, 4, 6];
+    let mut header_hits = vec![
+        Some(MouseHit::JobHeader(JobColumn::JobId)),
+        Some(MouseHit::JobHeader(JobColumn::Partition)),
+        Some(MouseHit::JobHeader(JobColumn::State)),
+        Some(MouseHit::JobHeader(JobColumn::Runtime)),
+        Some(MouseHit::JobHeader(JobColumn::TimeLimit)),
+        Some(MouseHit::JobHeader(JobColumn::Nodes)),
+        Some(MouseHit::JobHeader(JobColumn::Cpus)),
+    ];
+    for segment in 0..resource_segments {
+        headers.push(sortable_header(
+            if resource_segments > 1 && segment == 0 {
+                "Resource footprint"
+            } else if resource_segments > 1 {
+                "Resource footprint →"
+            } else {
+                "Resource footprint"
+            },
+            false,
+            app.job_sort.direction,
+            theme,
+        ));
+        column_widths.push(resource_segment_width as u16);
+        header_hits.push(None);
+    }
+    headers.push(sortable_header(
+        "Placement or reason",
+        app.job_sort.column == JobColumn::WhereWhy,
+        app.job_sort.direction,
+        theme,
+    ));
+    column_widths.push(where_width);
+    header_hits.push(Some(MouseHit::JobHeader(JobColumn::WhereWhy)));
+    for segment in 0..name_segments {
+        headers.push(sortable_header(
+            if name_segments > 1 && segment == 0 {
+                "Name"
+            } else if name_segments > 1 {
+                "Name →"
+            } else {
+                "Name"
+            },
+            app.job_sort.column == JobColumn::Name,
+            app.job_sort.direction,
+            theme,
+        ));
+        column_widths.push(name_segment_width as u16);
+        header_hits.push(Some(MouseHit::JobHeader(JobColumn::Name)));
+    }
+
+    let full_rows: Vec<Vec<Cell>> = rows
+        .iter()
+        .zip(resource_texts.iter())
+        .map(|(job, resource_text)| {
+            let mut cells = vec![
+                Cell::from(job.job_id.clone()),
+                Cell::from(Line::from(vec![Span::styled(
+                    job.partition_raw.clone(),
+                    theme.partition_style(job.primary_partition()),
+                )])),
+                Cell::from(job.state.clone()),
+                Cell::from(job.runtime_raw.clone()),
+                Cell::from(job.time_limit_raw.clone()),
+                Cell::from(job.nodes.to_string()),
+                Cell::from(
+                    job.cpus
+                        .map(|value: u32| value.to_string())
+                        .unwrap_or_else(|| "N/A".to_string()),
+                ),
+            ];
+            for segment in 0..resource_segments {
+                cells.push(Cell::from(segment_text(
+                    resource_text,
+                    segment,
+                    resource_segment_width,
+                )));
+            }
+            cells.push(Cell::from(job.location_or_reason.clone()));
+            for segment in 0..name_segments {
+                cells.push(Cell::from(segment_text(
+                    &job.name,
+                    segment,
+                    name_segment_width,
+                )));
+            }
+            cells
+        })
+        .collect();
+    let (visible_indices, hidden_left, hidden_right) = visible_column_indices(
+        &column_widths,
+        sections[1].width.saturating_sub(4),
+        app.job_horizontal_offset,
+    );
+    let constraints = visible_indices
+        .iter()
+        .map(|index| Constraint::Length(column_widths[*index]))
+        .collect::<Vec<_>>();
+    let visible_headers = visible_indices
+        .iter()
+        .map(|index| headers[*index].clone())
+        .collect::<Vec<_>>();
+    let visible_hits = visible_indices
+        .iter()
+        .map(|index| header_hits[*index].clone())
+        .collect::<Vec<_>>();
+    let table_rows: Vec<Row> = rows
+        .iter()
+        .zip(full_rows.iter())
+        .map(|(job, cells)| {
+            let visible_cells = visible_indices
+                .iter()
+                .map(|index| cells[*index].clone())
+                .collect::<Vec<_>>();
+            Row::new(visible_cells).style(job_state_style(job, theme))
+        })
+        .collect();
+
+    let title = wide_table_title(
+        &format!("User Jobs: {}", user_name),
+        hidden_left,
+        hidden_right,
+    );
+    if rows.is_empty() {
+        hit_map.set_page_rows(1);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "No active jobs for {} match the current filters.",
+                user_name
+            ))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title(title)),
+            sections[1],
+        );
+        return;
+    }
+
+    let table = Table::new(table_rows, constraints.clone())
+        .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .row_highlight_style(theme.highlight)
+        .highlight_symbol(">> ");
+    let mut state = TableState::default();
+    state.select(Some(
+        app.selected_user_jobs.min(rows.len().saturating_sub(1)),
+    ));
+    frame.render_stateful_widget(table, sections[1], &mut state);
+    register_table_rows(hit_map, sections[1], rows.len(), RowKind::UserJobs);
     register_header_hits(hit_map, sections[1], &constraints, &visible_hits);
 }
 
@@ -926,7 +1200,7 @@ fn render_users(
             toggle_badge("Mine-only view", app.show_only_mine, theme),
         ]),
         Line::from(format!(
-            "Sort: {}  Search query: {}  Horizontal view: column {} (Left / Right)",
+            "Sort: {}  Search query: {}  Horizontal view: column {} (← →)",
             app.sort_label(),
             if app.active_global_query().is_empty() {
                 "All users".to_string()
@@ -1091,10 +1365,11 @@ fn render_users(
     frame.render_stateful_widget(
         Table::new(user_rows, constraints.clone())
             .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Active users  Hidden left: {}  Hidden right: {}",
-                hidden_left, hidden_right
-            )))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(wide_table_title("Active users", hidden_left, hidden_right)),
+            )
             .row_highlight_style(theme.highlight)
             .highlight_symbol(">> "),
         sections[1],
@@ -1246,10 +1521,15 @@ fn render_users(
     frame.render_widget(
         Table::new(job_rows, constraints)
             .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Jobs for selected user  Hidden left: {}  Hidden right: {}",
-                hidden_left, hidden_right
-            ))),
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(wide_table_title(
+                        "Jobs for selected user",
+                        hidden_left,
+                        hidden_right,
+                    )),
+            ),
         lower[1],
     );
 }
@@ -1281,7 +1561,8 @@ fn render_partition_detail(
 
     let jobs = app.visible_partition_jobs(&partition.name);
     let resource_scale = JobResourceScale::from_jobs(&jobs);
-    let resource_segment_width = adaptive_segment_width(layout[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let resource_segment_width =
+        adaptive_segment_width(layout[1].width, RESOURCE_SEGMENT_WIDTH, 12);
     let name_segment_width = adaptive_segment_width(layout[1].width, NAME_SEGMENT_WIDTH, 12);
     let resource_texts = jobs
         .iter()
@@ -1430,10 +1711,11 @@ fn render_partition_detail(
 
     let table = Table::new(table_rows, constraints.clone())
         .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
-        .block(Block::default().borders(Borders::ALL).title(format!(
-            "Jobs  Hidden left: {}  Hidden right: {}",
-            hidden_left, hidden_right
-        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(wide_table_title("Jobs", hidden_left, hidden_right)),
+        )
         .row_highlight_style(theme.highlight)
         .highlight_symbol(">> ");
     let mut state = TableState::default();
@@ -1472,6 +1754,43 @@ fn render_partition_detail_summary(
         .split(chunks[1]);
 
     let total = partition.total_usage();
+    let running_ownership = styled_stacked_bar_line(
+        partition.mine.running_total(app.metric_mode),
+        partition.others.running_total(app.metric_mode),
+        partition.capacity_for(app.metric_mode),
+        26,
+        "Mine",
+        "Others",
+        theme.mine,
+        theme.other,
+        theme,
+    );
+    let pending_ownership = styled_stacked_bar_line(
+        partition.mine.pending_total(app.metric_mode),
+        partition.others.pending_total(app.metric_mode),
+        Some(
+            partition.mine.pending_total(app.metric_mode)
+                + partition.others.pending_total(app.metric_mode)
+                + 1,
+        ),
+        26,
+        "Mine",
+        "Others",
+        theme.mine,
+        theme.other,
+        theme,
+    );
+    let running_pending = styled_stacked_bar_line(
+        u64::from(total.running_jobs),
+        u64::from(total.pending_jobs),
+        Some(u64::from(total.running_jobs + total.pending_jobs).max(1)),
+        26,
+        "Running",
+        "Pending",
+        theme.running,
+        theme.pending,
+        theme,
+    );
     let left_lines = vec![
         Line::from(vec![
             Span::styled(
@@ -1493,39 +1812,21 @@ fn render_partition_detail_summary(
                 26,
             )),
         ]),
-        Line::from(vec![
-            Span::raw("Running ownership: "),
-            Span::raw(stacked_bar_text(
-                partition.mine.running_total(app.metric_mode),
-                partition.others.running_total(app.metric_mode),
-                partition.capacity_for(app.metric_mode),
-                26,
-            )),
-        ]),
-        Line::from(vec![
-            Span::raw("Pending ownership: "),
-            Span::raw(stacked_bar_text(
-                partition.mine.pending_total(app.metric_mode),
-                partition.others.pending_total(app.metric_mode),
-                Some(
-                    partition.mine.pending_total(app.metric_mode)
-                        + partition.others.pending_total(app.metric_mode)
-                        + 1,
-                ),
-                26,
-            )),
-        ]),
-        Line::from(vec![
-            Span::raw("Running versus pending jobs: "),
-            Span::raw(stacked_bar_text_with_labels(
-                u64::from(total.running_jobs),
-                u64::from(total.pending_jobs),
-                Some(u64::from(total.running_jobs + total.pending_jobs).max(1)),
-                26,
-                "Running",
-                "Pending",
-            )),
-        ]),
+        {
+            let mut spans = vec![Span::raw("Running ownership: ")];
+            spans.extend(running_ownership.spans);
+            Line::from(spans)
+        },
+        {
+            let mut spans = vec![Span::raw("Pending ownership: ")];
+            spans.extend(pending_ownership.spans);
+            Line::from(spans)
+        },
+        {
+            let mut spans = vec![Span::raw("Running versus pending jobs: ")];
+            spans.extend(running_pending.spans);
+            Line::from(spans)
+        },
         Line::from(format!(
             "CPU in use: {} / {}  GPU in use: {} / {}  Memory capacity: {}",
             total.running_cpus,
@@ -1607,8 +1908,7 @@ fn render_partition_detail_summary(
             )
         })
         .collect::<Vec<_>>();
-    let capacity_segment_width =
-        adaptive_segment_width(trend_and_nodes[1].width, 24, 12);
+    let capacity_segment_width = adaptive_segment_width(trend_and_nodes[1].width, 24, 12);
     let capacity_segments = max_segments(&capacity_texts, capacity_segment_width);
     let mut headers = vec![Line::from("Node"), Line::from("State")];
     let mut column_widths = vec![node_name_width, node_state_width];
@@ -1666,10 +1966,13 @@ fn render_partition_detail_summary(
         Table::new(visible_rows, constraints)
             .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
             .block(
-                Block::default().borders(Borders::ALL).title(format!(
-                    "Nodes in this Partition  Hidden left: {}  Hidden right: {}",
-                    hidden_left, hidden_right
-                )),
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(wide_table_title(
+                        "Nodes in this Partition",
+                        hidden_left,
+                        hidden_right,
+                    )),
             )
             .row_highlight_style(theme.highlight)
             .highlight_symbol(">> "),
@@ -2001,10 +2304,15 @@ fn render_node_detail(
     frame.render_stateful_widget(
         Table::new(table_rows, constraints.clone())
             .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Jobs on this Node  Hidden left: {}  Hidden right: {}",
-                hidden_left, hidden_right
-            )))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(wide_table_title(
+                        "Jobs on this Node",
+                        hidden_left,
+                        hidden_right,
+                    )),
+            )
             .row_highlight_style(theme.highlight)
             .highlight_symbol(">> "),
         sections[2],
@@ -2067,7 +2375,8 @@ fn render_history(
 
     let rows = app.visible_history();
 
-    let history_name_segment_width = adaptive_segment_width(sections[1].width, NAME_SEGMENT_WIDTH, 12);
+    let history_name_segment_width =
+        adaptive_segment_width(sections[1].width, NAME_SEGMENT_WIDTH, 12);
     let history_partition_width = adaptive_text_width(
         &rows
             .iter()
@@ -2079,7 +2388,10 @@ fn render_history(
         12,
     );
     let history_name_segments = max_segments(
-        &rows.iter().map(|history| history.name.clone()).collect::<Vec<_>>(),
+        &rows
+            .iter()
+            .map(|history| history.name.clone())
+            .collect::<Vec<_>>(),
         history_name_segment_width,
     );
     let resource_width = adaptive_segment_width(sections[1].width, 18, 12) as u16;
@@ -2112,7 +2424,11 @@ fn render_history(
                 Cell::from(history.job_id.clone()),
                 Cell::from(Line::from(vec![Span::styled(
                     history.user.clone(),
-                    if history.is_mine { theme.mine } else { theme.other },
+                    if history.is_mine {
+                        theme.mine
+                    } else {
+                        theme.other
+                    },
                 )])),
                 Cell::from(history.partition.clone().unwrap_or_else(|| "-".to_string())),
                 Cell::from(history.state.clone()),
@@ -2166,10 +2482,11 @@ fn render_history(
 
     let table = Table::new(visible_rows, constraints)
         .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
-        .block(Block::default().borders(Borders::ALL).title(format!(
-            "History Jobs  Hidden left: {}  Hidden right: {}",
-            hidden_left, hidden_right
-        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(wide_table_title("History Jobs", hidden_left, hidden_right)),
+        )
         .row_highlight_style(theme.highlight)
         .highlight_symbol(">> ");
     let mut state = TableState::default();
@@ -2205,7 +2522,7 @@ fn render_footer(
     render_footer_actions(frame, sections[0], app, theme, hit_map);
 
     let nav = format!(
-        "Navigation: Tab switch pages  j/k move selection  Enter open detail  i show job detail  Left / Right move horizontal view in overview and wide tables  Mouse click or double-click  Wheel scroll"
+        "Navigation: Tab switch top-level pages  j/k move selection  Space next page  b previous page  Enter open detail  i show job detail  ← → horizontal view in wide tables  Mouse click or double-click  Wheel scroll"
     );
     frame.render_widget(
         Paragraph::new(nav)
@@ -2214,27 +2531,46 @@ fn render_footer(
         sections[1],
     );
 
-    let page_hint = match app.current_page() {
-        Page::Overview => {
-            "Overview: g change metric  p pin partition  Enter open partition detail  Left / Right move horizontal view  Click column headers to sort"
-        }
-        Page::MyJobs | Page::AllJobs => {
-            "Queue: f change state filter  s change sort  m toggle mine-only  x cancel selected job  X review visible jobs for cancel  Click column headers to sort  Back: b or ← Overview"
-        }
-        Page::PartitionDetail => {
-            "Partition: s change job sort  [ or ] choose node  n open selected node  g metric  m toggle mine-only  x cancel selected job  b back"
-        }
-        Page::Users => {
-            "Users: s change sort  m toggle mine-only  Left / Right move horizontal view  Click column headers to sort  Search filters users and the selected user's jobs"
-        }
-        Page::NodeDetail => {
-            "Node: u user filter  f state filter  w where filter  y why filter  c clear filters  x cancel selected job  b back"
-        }
+    let tail = if let Some(modal) = &app.modal {
+        let modal_hint = match modal {
+            Modal::Help => "Help: j/k scroll  Space/b page  g/G top/bottom  q or Esc close",
+            Modal::JobDetail(_) => {
+                "Job Detail: j/k scroll  Space/b page  g/G top/bottom  q back  Wheel scroll"
+            }
+            Modal::ConfirmCancel(_) => {
+                "Cancel Preview: j/k scroll  Space/b page  g/G top/bottom  Enter/y confirm  q/Esc/n back"
+            }
+            Modal::CancelResult(_) => {
+                "Cancel Result: j/k scroll  Space/b page  g/G top/bottom  q back  Wheel scroll"
+            }
+        };
+        modal_hint.to_string()
+    } else {
+        let page_hint = match app.current_page() {
+            Page::Overview => {
+                "Overview: q Quit  g change metric  p pin partition  Enter open partition detail  ← → horizontal view  Click column headers to sort"
+            }
+            Page::MyJobs | Page::AllJobs => {
+                "Queue: q Quit  f change state filter  s change sort  m toggle mine-only  x cancel selected job  X review visible jobs for cancel  Enter open job detail  ← → horizontal view"
+            }
+            Page::PartitionDetail => {
+                "Partition: q Back  Tab switch top-level pages  s change job sort  [ or ] choose node  n open selected node  g metric  m toggle mine-only  x cancel selected job  ← → horizontal view"
+            }
+            Page::Users => {
+                "Users: q Quit  Enter open selected user's jobs  s change sort  m toggle mine-only  Space / b page  ← → horizontal view  Click column headers to sort"
+            }
+            Page::UserJobs => {
+                "User Jobs: q Back  Enter open job detail  f change state filter  s change sort  x cancel selected job  X review visible jobs for cancel  Space / b page  ← → horizontal view"
+            }
+            Page::NodeDetail => {
+                "Node: q Back  u user filter  f state filter  w where filter  y why filter  c clear filters  x cancel selected job  Space / b page  ← → horizontal view"
+            }
+        };
+        format!(
+            "{}  Search: /  Help: h  Mouse: tabs, rows, footer buttons, and modal buttons",
+            page_hint
+        )
     };
-    let tail = format!(
-        "{}  Search: /  Help: h  Mouse: tabs, rows, footer buttons, and modal buttons",
-        page_hint
-    );
     let last_index = if app.settings.compact { 1 } else { 2 };
     frame.render_widget(
         Paragraph::new(tail)
@@ -2255,7 +2591,7 @@ fn render_footer_actions(
     let mut spans = Vec::new();
     let mut x = area.x;
     for action in actions {
-        let label = footer_action_label(action);
+        let label = footer_action_label(action, app);
         let token = format!("[{label}] ");
         spans.push(Span::styled(
             token.clone(),
@@ -2278,11 +2614,13 @@ fn render_modal(
     hit_map.push(frame.area(), MouseHit::Modal(ModalAction::Close));
     match modal {
         Modal::Help => render_help_modal(frame, app, theme, hit_map),
-        Modal::JobDetail(detail) => render_job_detail_modal(frame, detail, theme, hit_map),
+        Modal::JobDetail(detail) => render_job_detail_modal(frame, detail, app, theme, hit_map),
         Modal::ConfirmCancel(preview) => {
-            render_cancel_confirm_modal(frame, preview, theme, hit_map)
+            render_cancel_confirm_modal(frame, preview, app, theme, hit_map)
         }
-        Modal::CancelResult(report) => render_cancel_result_modal(frame, report, theme, hit_map),
+        Modal::CancelResult(report) => {
+            render_cancel_result_modal(frame, report, app, theme, hit_map)
+        }
     }
 }
 
@@ -2344,19 +2682,23 @@ fn toggle_badge(label: &str, enabled: bool, theme: &Theme) -> Span<'static> {
     )
 }
 
-fn render_help_modal(frame: &mut Frame, _app: &AppState, theme: &Theme, hit_map: &mut UiHitMap) {
+fn render_help_modal(frame: &mut Frame, app: &AppState, theme: &Theme, hit_map: &mut UiHitMap) {
     let area = centered_rect(78, 78, frame.area());
     frame.render_widget(Clear, area);
+    hit_map.push(area, MouseHit::Modal(ModalAction::Ignore));
     let text = vec![
         Line::from(Span::styled(
             "Navigation",
             theme.title.add_modifier(Modifier::BOLD),
         )),
         Line::from(
-            "Tab / Shift-Tab switch top-level pages. j/k or arrows move the current list. Enter opens the focused detail. b or Esc goes back.",
+            "Tab / Shift-Tab switch top-level pages. j/k or arrows move the current list. Space pages forward, b pages back, and Enter opens the focused detail.",
         ),
         Line::from(
-            "Mouse: click tabs, click rows to select, double-click rows to open, wheel scrolls lists, footer buttons are clickable.",
+            "q goes back from detail pages and quits only from top-level pages. Esc also closes the current detail or modal.",
+        ),
+        Line::from(
+            "Mouse: click tabs, click rows to select, double-click rows to open, wheel scrolls lists and modal pages, footer buttons are clickable.",
         ),
         Line::from(
             "Click sortable column headers in Overview, Users, My Jobs, and All Jobs to sort immediately. Click the same header again to reverse the direction.",
@@ -2373,7 +2715,7 @@ fn render_help_modal(frame: &mut Frame, _app: &AppState, theme: &Theme, hit_map:
             "Overview, My Jobs, All Jobs, and Partition Detail keep rolling trend panels for running and pending job counts.",
         ),
         Line::from(
-            "User View ranks active users by jobs and resources, then shows the selected user's active jobs and main partitions.",
+            "User View ranks active users by jobs and resources, then Enter opens a dedicated User Jobs page for the selected user.",
         ),
         Line::from(
             "Partition Detail shows pressure, running-versus-pending jobs, node-state distribution, and a node list for that partition.",
@@ -2396,7 +2738,7 @@ fn render_help_modal(frame: &mut Frame, _app: &AppState, theme: &Theme, hit_map:
             "i shows job detail. x cancels the selected job. X reviews visible jobs for bulk cancel.",
         ),
         Line::from(
-            "Overview, Users, and wide queue tables can be moved horizontally with Left / Right. In the job-detail modal, clicking outside the panel closes it.",
+            "Overview, Users, and wide queue tables can be moved horizontally with ← / →. In modal detail pages, click outside the panel to close.",
         ),
         Line::from(
             "All cancel flows are previewed first and only allow your own active jobs by default.",
@@ -2411,383 +2753,1198 @@ fn render_help_modal(frame: &mut Frame, _app: &AppState, theme: &Theme, hit_map:
         Line::from("Node Detail: scontrol show node -o plus squeue -w <node>."),
         Line::from("Job Detail: scontrol show job -o plus sacct job lookup."),
         Line::from(""),
-        Line::from("Press Enter / Esc / h to close"),
+        Line::from("Close with Enter / Esc / h / q. Scroll with j/k, arrows, Space, b, g, or G."),
     ];
-    frame.render_widget(
-        Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Help"))
-            .wrap(Wrap { trim: true }),
+    render_scrollable_detail_modal(
+        frame,
         area,
+        "Help",
+        text,
+        "j/k move  Space/b page  g/G top/bottom  q Close  Wheel scroll",
+        app.modal_scroll(),
+        theme.muted,
+        theme,
+        hit_map,
     );
-    hit_map.push(area, MouseHit::Modal(ModalAction::Ignore));
+}
+
+thread_local! {
+    static DETAIL_LAYOUT_CACHE: RefCell<Option<DetailLayoutCache>> = RefCell::new(None);
+}
+
+#[derive(Clone)]
+struct DetailLayoutCache {
+    revision: u64,
+    width: u16,
+    lines: Vec<Line<'static>>,
+}
+
+#[derive(Clone)]
+struct KvField {
+    label: String,
+    value: String,
+    label_style: Option<Style>,
+    value_style: Option<Style>,
+}
+
+fn kv_styled(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    label_style: Style,
+    value_style: Style,
+) -> KvField {
+    KvField {
+        label: label.into(),
+        value: value.into(),
+        label_style: Some(label_style),
+        value_style: Some(value_style),
+    }
+}
+
+fn scroll_metrics(
+    line_count: usize,
+    height: u16,
+    scroll: usize,
+) -> (usize, usize, usize, usize, usize) {
+    let visible_rows = height.saturating_sub(2) as usize;
+    let total_rows = line_count.max(1);
+    let max_scroll = total_rows.saturating_sub(visible_rows.max(1));
+    let clamped = scroll.min(max_scroll);
+    let start_line = if total_rows == 0 { 0 } else { clamped + 1 };
+    let end_line = if total_rows == 0 {
+        0
+    } else {
+        (clamped + visible_rows.max(1)).min(total_rows)
+    };
+    (
+        clamped,
+        total_rows,
+        start_line,
+        end_line,
+        visible_rows.max(1),
+    )
+}
+
+fn cached_detail_lines<F>(revision: u64, width: u16, build: F) -> Vec<Line<'static>>
+where
+    F: FnOnce(usize) -> Vec<Line<'static>>,
+{
+    DETAIL_LAYOUT_CACHE.with(|cache| {
+        if let Some(cache) = cache.borrow().as_ref()
+            && cache.revision == revision
+            && cache.width == width
+        {
+            return cache.lines.clone();
+        }
+        let content_width = width.saturating_sub(2).max(1) as usize;
+        let lines = build(content_width);
+        *cache.borrow_mut() = Some(DetailLayoutCache {
+            revision,
+            width,
+            lines: lines.clone(),
+        });
+        lines
+    })
+}
+
+fn chunk_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let chars: Vec<char> = text.chars().collect();
+    chars
+        .chunks(width)
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect()
+}
+
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for raw in text.split('\n') {
+        lines.extend(chunk_text(raw, width));
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn pad_right(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        text.chars().take(width).collect()
+    } else {
+        format!("{}{}", text, " ".repeat(width - len))
+    }
+}
+
+fn truncate_chars(text: &str, width: usize) -> String {
+    text.chars().take(width).collect()
+}
+
+fn line_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum()
+}
+
+fn state_style(state: &str, theme: &Theme) -> Style {
+    let upper = state.to_ascii_uppercase();
+    if upper.contains("RUN") || upper.contains("COMPLETING") || upper.contains("CONFIGURING") {
+        theme.running
+    } else if upper.contains("PEND") {
+        theme.pending
+    } else if upper.contains("FAIL")
+        || upper.contains("CANCEL")
+        || upper.contains("TIMEOUT")
+        || upper.contains("DOWN")
+    {
+        theme.danger
+    } else {
+        theme.accent
+    }
+}
+
+fn is_skipped_message(message: &str) -> bool {
+    let upper = message.to_ascii_uppercase();
+    upper.contains("SKIP") || upper.contains("NOT ALLOWED") || upper.contains("DENIED")
+}
+
+fn border_line(
+    left: char,
+    title: Option<(&str, Style)>,
+    inner: usize,
+    frame_style: Style,
+) -> Line<'static> {
+    match left {
+        '┌' => {
+            let title_text = truncate_chars(
+                &format!(" {} ", title.map(|(text, _)| text).unwrap_or("")),
+                inner,
+            );
+            let title_len = title_text.chars().count();
+            let fill = inner.saturating_sub(title_len);
+            if let Some((_, title_style)) = title {
+                Line::from(vec![
+                    Span::styled("┌", frame_style),
+                    Span::styled(title_text, title_style.add_modifier(Modifier::BOLD)),
+                    Span::styled("─".repeat(fill), frame_style),
+                    Span::styled("┐", frame_style),
+                ])
+            } else {
+                Line::from(Span::styled(
+                    format!("┌{}┐", "─".repeat(inner)),
+                    frame_style,
+                ))
+            }
+        }
+        '└' => Line::from(Span::styled(
+            format!("└{}┘", "─".repeat(inner)),
+            frame_style,
+        )),
+        _ => Line::from(Span::styled(
+            format!(
+                "{}{}{}",
+                left,
+                "─".repeat(inner),
+                match left {
+                    '├' => '┤',
+                    _ => right_border_for(left),
+                }
+            ),
+            frame_style,
+        )),
+    }
+}
+
+fn right_border_for(left: char) -> char {
+    match left {
+        '├' => '┤',
+        _ => '┘',
+    }
+}
+
+fn blank_box_line(inner: usize, frame_style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("│", frame_style),
+        Span::raw(" ".repeat(inner)),
+        Span::styled("│", frame_style),
+    ])
+}
+
+fn render_kv_box(
+    title: &str,
+    fields: &[KvField],
+    width: usize,
+    stacked: bool,
+    frame_style: Style,
+    title_style: Style,
+    label_style: Style,
+) -> Vec<Line<'static>> {
+    let inner = width.saturating_sub(2).max(1);
+    let mut lines = Vec::new();
+    lines.push(border_line(
+        '┌',
+        Some((title, title_style)),
+        inner,
+        frame_style,
+    ));
+
+    if stacked {
+        for field in fields {
+            let field_label_style = field
+                .label_style
+                .unwrap_or(label_style)
+                .add_modifier(Modifier::BOLD);
+            let field_value_style = field.value_style.unwrap_or(Style::default());
+            lines.push(Line::from(vec![
+                Span::styled("│", frame_style),
+                Span::styled(pad_right(&field.label, inner), field_label_style),
+                Span::styled("│", frame_style),
+            ]));
+            for wrapped in wrap_text(&field.value, inner.saturating_sub(2).max(1)) {
+                lines.push(Line::from(vec![
+                    Span::styled("│", frame_style),
+                    Span::styled(
+                        pad_right(&format!("  {}", wrapped), inner),
+                        field_value_style,
+                    ),
+                    Span::styled("│", frame_style),
+                ]));
+            }
+            lines.push(blank_box_line(inner, frame_style));
+        }
+        if fields.is_empty() {
+            lines.push(blank_box_line(inner, frame_style));
+        }
+    } else {
+        let label_width = fields
+            .iter()
+            .map(|field| field.label.chars().count())
+            .max()
+            .unwrap_or(0)
+            .clamp(8, 18);
+        let value_width = inner.saturating_sub(label_width + 1).max(1);
+        for field in fields {
+            let wrapped = wrap_text(&field.value, value_width);
+            let field_label_style = field
+                .label_style
+                .unwrap_or(label_style)
+                .add_modifier(Modifier::BOLD);
+            let field_value_style = field.value_style.unwrap_or(Style::default());
+            for (index, part) in wrapped.iter().enumerate() {
+                let label = if index == 0 {
+                    pad_right(&field.label, label_width)
+                } else {
+                    " ".repeat(label_width)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("│", frame_style),
+                    Span::styled(label, field_label_style),
+                    Span::raw(" "),
+                    Span::styled(pad_right(part, value_width), field_value_style),
+                    Span::styled("│", frame_style),
+                ]));
+            }
+        }
+        if fields.is_empty() {
+            lines.push(blank_box_line(inner, frame_style));
+        }
+    }
+
+    while lines.len() > 2
+        && line_width(lines.last().unwrap()) == inner + 2
+        && line_width(&lines[lines.len() - 2]) == inner + 2
+    {
+        let blank = format!("│{}│", " ".repeat(inner));
+        let last_text: String = lines
+            .last()
+            .unwrap()
+            .spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        let prev_text: String = lines[lines.len() - 2]
+            .spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        if last_text == blank && prev_text == blank {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+
+    lines.push(border_line('└', None, inner, frame_style));
+    lines
+}
+
+fn combine_boxes(
+    left: Vec<Line<'static>>,
+    right: Vec<Line<'static>>,
+    gap: usize,
+) -> Vec<Line<'static>> {
+    let left_width = left.first().map(line_width).unwrap_or(0);
+    let right_width = right.first().map(line_width).unwrap_or(0);
+    let max_lines = left.len().max(right.len());
+    let blank_left = Line::from(" ".repeat(left_width));
+    let blank_right = Line::from(" ".repeat(right_width));
+    let mut out = Vec::new();
+    for index in 0..max_lines {
+        let left_line = left
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| blank_left.clone());
+        let right_line = right
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| blank_right.clone());
+        let mut spans = left_line.spans;
+        spans.push(Span::raw(" ".repeat(gap)));
+        spans.extend(right_line.spans);
+        out.push(Line::from(spans));
+    }
+    out
+}
+
+fn render_detail_grid(
+    rows: Vec<(Vec<Line<'static>>, Option<Vec<Line<'static>>>)>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let row_count = rows.len();
+    for (index, (left, right)) in rows.into_iter().enumerate() {
+        let row_lines = if let Some(right) = right {
+            combine_boxes(left, right, 2)
+        } else {
+            left
+        };
+        lines.extend(row_lines);
+        if index + 1 != row_count {
+            lines.push(Line::from(""));
+        }
+    }
+    lines
+}
+
+fn table_border(
+    left: char,
+    mid: char,
+    right: char,
+    widths: &[usize],
+    style: Style,
+) -> Line<'static> {
+    let parts = widths
+        .iter()
+        .map(|width| "─".repeat(width + 2))
+        .collect::<Vec<_>>();
+    Line::from(Span::styled(
+        format!("{}{}{}", left, parts.join(&mid.to_string()), right),
+        style,
+    ))
+}
+
+fn render_wrapped_table(
+    title: &str,
+    note: Option<&str>,
+    headers: &[&str],
+    widths: &[usize],
+    rows: &[Vec<String>],
+    frame_style: Style,
+    title_style: Style,
+    header_style: Style,
+    row_style: Style,
+) -> Vec<Line<'static>> {
+    let total_inner =
+        widths.iter().map(|width| width + 2).sum::<usize>() + widths.len().saturating_sub(1);
+    let title_text = truncate_chars(&format!(" {} ", title), total_inner);
+    let title_len = title_text.chars().count();
+    let mut lines = vec![Line::from(vec![
+        Span::styled("┌", frame_style),
+        Span::styled(title_text, title_style.add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "─".repeat(total_inner.saturating_sub(title_len)),
+            frame_style,
+        ),
+        Span::styled("┐", frame_style),
+    ])];
+    if let Some(note) = note {
+        for wrapped in wrap_text(note, total_inner) {
+            lines.push(Line::from(vec![
+                Span::styled("│", frame_style),
+                Span::styled(pad_right(&wrapped, total_inner), header_style),
+                Span::styled("│", frame_style),
+            ]));
+        }
+        lines.push(Line::from(Span::styled(
+            format!("├{}┤", "─".repeat(total_inner)),
+            frame_style,
+        )));
+    }
+    lines.push(table_border('├', '┬', '┤', widths, frame_style));
+    let mut header_spans = vec![Span::styled("│", frame_style)];
+    for (idx, (header, width)) in headers.iter().zip(widths.iter()).enumerate() {
+        header_spans.push(Span::styled(
+            format!(" {} ", pad_right(header, *width)),
+            header_style.add_modifier(Modifier::BOLD),
+        ));
+        header_spans.push(Span::styled(
+            if idx + 1 == widths.len() {
+                "│"
+            } else {
+                "│"
+            },
+            frame_style,
+        ));
+    }
+    lines.push(Line::from(header_spans));
+    lines.push(table_border('├', '┼', '┤', widths, frame_style));
+    if rows.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("│", frame_style),
+            Span::styled(pad_right("No rows", total_inner), row_style),
+            Span::styled("│", frame_style),
+        ]));
+    } else {
+        for row in rows {
+            let wrapped_cells = row
+                .iter()
+                .zip(widths.iter())
+                .map(|(value, width)| wrap_text(value, *width))
+                .collect::<Vec<_>>();
+            let height = wrapped_cells.iter().map(Vec::len).max().unwrap_or(1);
+            for line_index in 0..height {
+                let mut spans = vec![Span::styled("│", frame_style)];
+                for (idx, (cell_lines, width)) in
+                    wrapped_cells.iter().zip(widths.iter()).enumerate()
+                {
+                    let value = cell_lines.get(line_index).map(String::as_str).unwrap_or("");
+                    spans.push(Span::styled(
+                        format!(" {} ", pad_right(value, *width)),
+                        row_style,
+                    ));
+                    spans.push(Span::styled(
+                        if idx + 1 == widths.len() {
+                            "│"
+                        } else {
+                            "│"
+                        },
+                        frame_style,
+                    ));
+                }
+                lines.push(Line::from(spans));
+            }
+            lines.push(table_border('├', '┼', '┤', widths, frame_style));
+        }
+        lines.pop();
+    }
+    lines.push(table_border('└', '┴', '┘', widths, frame_style));
+    lines
+}
+
+fn render_scrollable_detail_modal(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    body_lines: Vec<Line<'static>>,
+    footer_hint: &str,
+    scroll: usize,
+    frame_style: Style,
+    theme: &Theme,
+    hit_map: &mut UiHitMap,
+) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(2)])
+        .split(area);
+    let (offset, total_rows, start_line, end_line, visible_rows) =
+        scroll_metrics(body_lines.len(), layout[0].height, scroll);
+    hit_map.set_page_rows(visible_rows);
+    let visible = body_lines
+        .iter()
+        .skip(offset)
+        .take(visible_rows)
+        .cloned()
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(visible).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(frame_style)
+                .title(Span::styled(
+                    title.to_string(),
+                    frame_style.add_modifier(Modifier::BOLD),
+                )),
+        ),
+        layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{}  Lines {}-{} / {}",
+            footer_hint, start_line, end_line, total_rows
+        ))
+        .style(theme.muted)
+        .block(Block::default().borders(Borders::TOP)),
+        layout[1],
+    );
 }
 
 fn render_job_detail_modal(
     frame: &mut Frame,
     detail: &crate::app::JobDetailModal,
+    app: &AppState,
     theme: &Theme,
     hit_map: &mut UiHitMap,
 ) {
-    let area = centered_rect(82, 78, frame.area());
+    let area = centered_rect(86, 84, frame.area());
     frame.render_widget(Clear, area);
     hit_map.push(area, MouseHit::Modal(ModalAction::Ignore));
     if detail.loading {
-        frame.render_widget(
-            Paragraph::new(format!("Loading detail for job {}...", detail.job_id))
-                .block(Block::default().borders(Borders::ALL).title("Job Detail"))
-                .alignment(Alignment::Center),
+        render_scrollable_detail_modal(
+            frame,
             area,
+            "Job Detail",
+            vec![Line::from(format!(
+                "Loading detail for job {}...",
+                detail.job_id
+            ))],
+            "q Back",
+            app.modal_scroll(),
+            theme.detail_frame,
+            theme,
+            hit_map,
         );
         return;
     }
 
-    if let Some(detail) = &detail.detail {
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(8),
-                Constraint::Length(8),
-                Constraint::Length(6),
-                Constraint::Min(7),
-            ])
-            .split(area);
-        let top = Line::from(vec![
-            Span::styled(
-                format!("Job {}", detail.job_id),
-                theme.title.add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                detail.state.as_deref().unwrap_or("N/A").to_string(),
-                theme.accent.add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  Click outside, Esc, b, or q to close"),
-        ]);
-        frame.render_widget(
-            Paragraph::new(top).block(Block::default().borders(Borders::ALL).title("Job Detail")),
-            layout[0],
-        );
+    let body_lines = cached_detail_lines(app.modal_revision(), area.width, |content_width| {
+        let detail = match &detail.detail {
+            Some(detail) => detail,
+            None => {
+                return render_detail_grid(vec![(
+                    render_kv_box(
+                        "Error",
+                        &[kv_styled(
+                            "Message",
+                            detail
+                                .error
+                                .clone()
+                                .unwrap_or_else(|| "Unknown error".to_string()),
+                            theme.danger,
+                            theme.danger,
+                        )],
+                        content_width,
+                        true,
+                        theme.detail_frame,
+                        theme.danger,
+                        theme.danger,
+                    ),
+                    None,
+                )]);
+            }
+        };
 
-        let top_blocks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-            .split(layout[1]);
-        render_kv_table(
-            frame,
-            top_blocks[0],
+        let two_col = content_width >= 84;
+        let box_width = if two_col {
+            (content_width.saturating_sub(2)) / 2
+        } else {
+            content_width
+        };
+        let state_text = detail.state.clone().unwrap_or_else(|| "N/A".to_string());
+        let state_value_style = state_style(&state_text, theme);
+        let basic = render_kv_box(
             "Basic",
-            &vec![
-                ("Job ID".to_string(), detail.job_id.clone()),
-                (
-                    "Name".to_string(),
+            &[
+                kv_styled("Job ID", detail.job_id.clone(), theme.accent, theme.accent),
+                kv_styled(
+                    "Name",
                     detail.name.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.title,
+                    Style::default(),
                 ),
-                (
-                    "User".to_string(),
+                kv_styled(
+                    "User",
                     detail.user.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.accent,
+                    theme.accent,
                 ),
-                (
-                    "Partition".to_string(),
+                kv_styled(
+                    "Account",
+                    detail.account.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.muted,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Partition",
                     detail
                         .partition
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.title,
+                    theme.title,
                 ),
-                (
-                    "State".to_string(),
-                    detail.state.clone().unwrap_or_else(|| "N/A".to_string()),
-                ),
-                ("Priority".to_string(), "N/A".to_string()),
+                kv_styled("State", state_text, state_value_style, state_value_style),
             ],
-            theme,
+            box_width,
+            false,
+            theme.detail_frame,
+            theme.title,
+            theme.accent,
         );
-        render_kv_table(
-            frame,
-            top_blocks[1],
+        let resources = render_kv_box(
             "Resources",
-            &vec![
-                (
-                    "Nodes".to_string(),
+            &[
+                kv_styled(
+                    "Nodes",
                     detail
                         .nodes
                         .map(|value| value.to_string())
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.success,
+                    theme.success,
                 ),
-                (
-                    "Tasks".to_string(),
+                kv_styled(
+                    "Tasks",
                     detail
                         .n_tasks
                         .map(|value| value.to_string())
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.success,
+                    theme.success,
                 ),
-                (
-                    "CPUs".to_string(),
+                kv_styled(
+                    "CPUs",
                     detail
                         .cpus
                         .map(|value| value.to_string())
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.success,
+                    theme.success,
                 ),
-                (
-                    "Memory".to_string(),
+                kv_styled(
+                    "Memory",
                     detail
                         .memory_mb
                         .map(format_mem_mb)
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.success,
+                    theme.success,
                 ),
-                (
-                    "GPUs".to_string(),
+                kv_styled(
+                    "GPUs",
                     detail
                         .requested_gpus
                         .map(|value| value.to_string())
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.success,
+                    theme.success,
                 ),
-                (
-                    "GRES".to_string(),
+                kv_styled(
+                    "GRES",
                     detail.gres.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.success,
+                    Style::default(),
                 ),
             ],
-            theme,
+            box_width,
+            false,
+            theme.detail_frame,
+            theme.success,
+            theme.success,
         );
-
-        let mid_blocks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-            .split(layout[2]);
-        render_kv_table(
-            frame,
-            mid_blocks[0],
+        let scheduling = render_kv_box(
             "Scheduling",
-            &vec![
-                (
-                    "Runtime".to_string(),
+            &[
+                kv_styled(
+                    "Runtime",
                     detail
                         .runtime_raw
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.pending,
+                    theme.pending,
                 ),
-                (
-                    "Time limit".to_string(),
+                kv_styled(
+                    "Time limit",
                     detail
                         .time_limit_raw
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.pending,
+                    theme.pending,
                 ),
-                (
-                    "Submit time".to_string(),
+                kv_styled(
+                    "Submit time",
                     detail
                         .submit_time
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.pending,
+                    Style::default(),
                 ),
-                (
-                    "Start time".to_string(),
+                kv_styled(
+                    "Start time",
                     detail
                         .start_time
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.pending,
+                    Style::default(),
                 ),
-                (
-                    "End time".to_string(),
+                kv_styled(
+                    "End time",
                     detail.end_time.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.pending,
+                    Style::default(),
                 ),
-                (
-                    "Exit code".to_string(),
+                kv_styled(
+                    "Exit code",
                     detail
                         .exit_code
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.pending,
+                    Style::default(),
                 ),
             ],
-            theme,
+            box_width,
+            false,
+            theme.detail_frame,
+            theme.pending,
+            theme.pending,
         );
-        render_kv_table(
-            frame,
-            mid_blocks[1],
+        let placement = render_kv_box(
             "Placement / Reason",
-            &vec![
-                (
-                    "Node list".to_string(),
+            &[
+                kv_styled(
+                    "Node list",
                     detail
                         .node_list
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.warning,
+                    Style::default(),
                 ),
-                (
-                    "Reason".to_string(),
+                kv_styled(
+                    "Reason",
                     detail.reason.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.warning,
+                    theme.warning,
                 ),
-                (
-                    "ReqTRES".to_string(),
+                kv_styled(
+                    "ReqTRES",
                     detail.req_tres.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.warning,
+                    theme.success,
                 ),
-                (
-                    "AllocTRES".to_string(),
+                kv_styled(
+                    "AllocTRES",
                     detail
                         .alloc_tres
                         .clone()
                         .unwrap_or_else(|| "N/A".to_string()),
+                    theme.warning,
+                    theme.success,
                 ),
             ],
-            theme,
+            box_width,
+            false,
+            theme.detail_frame,
+            theme.warning,
+            theme.warning,
         );
-
-        let lower_blocks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-            .split(layout[3]);
-        render_wrapped_field(
-            frame,
-            lower_blocks[0],
+        let paths = render_kv_box(
             "Paths",
             &[
-                format!("Workdir: {}", detail.work_dir.as_deref().unwrap_or("N/A")),
-                format!("Stdout: {}", detail.stdout_path.as_deref().unwrap_or("N/A")),
-                format!("Stderr: {}", detail.stderr_path.as_deref().unwrap_or("N/A")),
+                kv_styled(
+                    "Workdir",
+                    detail.work_dir.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.accent,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Stdout",
+                    detail
+                        .stdout_path
+                        .clone()
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    theme.accent,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Stderr",
+                    detail
+                        .stderr_path
+                        .clone()
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    theme.accent,
+                    Style::default(),
+                ),
             ],
-            theme,
+            box_width,
+            false,
+            theme.detail_frame,
+            theme.accent,
+            theme.accent,
         );
-        render_wrapped_field(
-            frame,
-            lower_blocks[1],
+        let extra = render_kv_box(
             "Extra",
             &[
-                format!("Command: {}", detail.command.as_deref().unwrap_or("N/A")),
-                format!(
-                    "Notes: {}",
+                kv_styled(
+                    "Command",
+                    detail.command.clone().unwrap_or_else(|| "N/A".to_string()),
+                    theme.title,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Notes",
                     if detail.source_notes.is_empty() {
                         "none".to_string()
                     } else {
-                        detail.source_notes.join(" | ")
-                    }
+                        detail.source_notes.join("\n")
+                    },
+                    theme.muted,
+                    theme.muted,
                 ),
             ],
-            theme,
+            box_width,
+            true,
+            theme.detail_frame,
+            theme.muted,
+            theme.muted,
+        );
+        let close_box = render_kv_box(
+            "Close",
+            &[kv_styled(
+                "Mouse / Keyboard",
+                "Click outside the panel to close. Keyboard: Esc, b, q, or Enter. Scroll with j/k, arrows, Space, b, g, or G.",
+                theme.muted,
+                theme.muted,
+            )],
+            content_width,
+            true,
+            theme.detail_frame,
+            theme.muted,
+            theme.muted,
         );
 
-        frame.render_widget(
-            Paragraph::new(
-                "Mouse: click outside the panel to close. Keyboard: Esc, b, q, or Enter.",
-            )
-            .block(Block::default().borders(Borders::ALL).title("Close")),
-            layout[4],
-        );
-    } else {
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::from("Job detail unavailable"),
-                Line::from(
-                    detail
-                        .error
-                        .clone()
-                        .unwrap_or_else(|| "Unknown error".to_string()),
-                ),
+        if two_col {
+            render_detail_grid(vec![
+                (basic, Some(resources)),
+                (scheduling, Some(placement)),
+                (paths, Some(extra)),
+                (close_box, None),
             ])
-            .block(Block::default().borders(Borders::ALL).title("Job Detail")),
-            area,
-        );
-    }
+        } else {
+            render_detail_grid(vec![
+                (basic, None),
+                (resources, None),
+                (scheduling, None),
+                (placement, None),
+                (paths, None),
+                (extra, None),
+                (close_box, None),
+            ])
+        }
+    });
+
+    render_scrollable_detail_modal(
+        frame,
+        area,
+        "Job Detail",
+        body_lines,
+        "j/k move  Space/b page  g/G top/bottom  q Back  Wheel scroll",
+        app.modal_scroll(),
+        theme.detail_frame,
+        theme,
+        hit_map,
+    );
 }
 
 fn render_cancel_confirm_modal(
     frame: &mut Frame,
     preview: &crate::app::CancelPreview,
+    app: &AppState,
     theme: &Theme,
     hit_map: &mut UiHitMap,
 ) {
-    let area = centered_rect(78, 72, frame.area());
+    let area = centered_rect(88, 84, frame.area());
     frame.render_widget(Clear, area);
     hit_map.push(area, MouseHit::Modal(ModalAction::Ignore));
-    let top = Layout::default()
+    let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
             Constraint::Min(8),
+            Constraint::Length(2),
             Constraint::Length(3),
         ])
         .split(area);
-    let intro = vec![
-        Line::from(Span::styled(
-            "Dangerous action",
-            theme.danger.add_modifier(Modifier::BOLD),
-        )),
-        Line::from(format!(
-            "{}  You are about to cancel {} job(s). Only your active jobs will be affected.",
-            preview.title,
-            preview.allowed_count()
-        )),
-        Line::from("Review the full list below before confirming."),
-    ];
-    frame.render_widget(
-        Paragraph::new(intro)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Confirm Cancel"),
-            )
-            .wrap(Wrap { trim: true }),
-        top[0],
-    );
 
-    let mut lines = Vec::new();
-    for (index, candidate) in preview
-        .candidates
-        .iter()
-        .take(top[1].height.saturating_sub(4) as usize)
-        .enumerate()
-    {
-        let style = if candidate.allowed {
-            theme.warning
-        } else {
-            theme.muted
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{:<8}", candidate.job_id), style),
-            Span::raw("  "),
-            Span::styled(
-                format!(
-                    "User: {}  Partition: {}  State: {}",
-                    candidate.user, candidate.partition, candidate.state
+    let body_lines = cached_detail_lines(app.modal_revision(), layout[0].width, |content_width| {
+        let allowed: Vec<_> = preview
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.allowed)
+            .collect();
+        let denied: Vec<_> = preview
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.allowed)
+            .collect();
+        let mut lines = Vec::new();
+        lines.extend(render_kv_box(
+            "Summary",
+            &[
+                kv_styled(
+                    "Operation",
+                    preview.title.clone(),
+                    theme.cancel_frame,
+                    theme.cancel_frame,
                 ),
-                style,
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled(
-                if candidate.allowed {
-                    "Will cancel: yes".to_string()
-                } else {
+                kv_styled(
+                    "Scope",
+                    match preview.scope {
+                        crate::app::CancelScope::Single => "single job".to_string(),
+                        crate::app::CancelScope::Visible => "visible filtered jobs".to_string(),
+                    },
+                    theme.warning,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Reviewed jobs",
+                    preview.candidates.len().to_string(),
+                    theme.warning,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Eligible jobs",
+                    allowed.len().to_string(),
+                    theme.success,
+                    theme.success,
+                ),
+                kv_styled(
+                    "Ineligible jobs",
+                    denied.len().to_string(),
+                    theme.muted,
+                    theme.muted,
+                ),
+                kv_styled(
+                    "Warning",
+                    "Dangerous action. Confirming starts scancel immediately for eligible jobs.",
+                    theme.danger,
+                    theme.danger,
+                ),
+            ],
+            content_width,
+            false,
+            theme.cancel_frame,
+            theme.cancel_frame,
+            theme.warning,
+        ));
+        lines.push(Line::from(""));
+
+        let table_widths = if content_width >= 96 {
+            vec![
+                8,
+                16,
+                10,
+                10,
+                8,
+                7,
+                content_width.saturating_sub(8 + 16 + 10 + 10 + 8 + 7 + 21),
+            ]
+        } else {
+            vec![
+                8,
+                12,
+                8,
+                8,
+                8,
+                7,
+                content_width.saturating_sub(8 + 12 + 8 + 8 + 8 + 7 + 19),
+            ]
+        };
+
+        let eligible_rows = allowed
+            .iter()
+            .map(|candidate| {
+                vec![
+                    candidate.job_id.clone(),
+                    candidate.name.clone(),
+                    candidate.user.clone(),
+                    candidate.partition.clone(),
+                    candidate.state.clone(),
+                    candidate.nodes.to_string(),
                     format!(
-                        "Will cancel: {}",
-                        candidate.reason.clone().unwrap_or_else(|| "no".to_string())
-                    )
+                        "ReqTRES: {}\nAllocTRES: {}\nPlacement: {}\nEligible: yes",
+                        candidate
+                            .req_tres
+                            .clone()
+                            .unwrap_or_else(|| "N/A".to_string()),
+                        candidate
+                            .alloc_tres
+                            .clone()
+                            .unwrap_or_else(|| "N/A".to_string()),
+                        candidate.placement_or_reason,
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>();
+        lines.extend(
+            render_wrapped_table(
+                if preview.scope == crate::app::CancelScope::Single {
+                    "Target Job"
+                } else {
+                    "Eligible Jobs"
                 },
-                style,
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("Name: ", theme.title.add_modifier(Modifier::BOLD)),
-            Span::styled(candidate.name.clone(), style),
-        ]));
-        if index + 1 != preview.candidates.len() {
+                Some("These jobs will be cancelled if you confirm."),
+                &[
+                    "JobID",
+                    "Name",
+                    "User",
+                    "Partition",
+                    "State",
+                    "Nodes",
+                    "Details",
+                ],
+                &table_widths,
+                &eligible_rows,
+                theme.cancel_frame,
+                theme.warning,
+                theme.warning,
+                theme.warning,
+            )
+            .into_iter()
+            .map(Line::from),
+        );
+        if !denied.is_empty() {
             lines.push(Line::from(""));
+            let denied_rows = denied
+                .iter()
+                .map(|candidate| {
+                    vec![
+                        candidate.job_id.clone(),
+                        candidate.name.clone(),
+                        candidate.user.clone(),
+                        candidate.partition.clone(),
+                        candidate.state.clone(),
+                        candidate.nodes.to_string(),
+                        format!(
+                            "Skip reason: {}\nPlacement: {}",
+                            candidate
+                                .reason
+                                .clone()
+                                .unwrap_or_else(|| "Not allowed".to_string()),
+                            candidate.placement_or_reason,
+                        ),
+                    ]
+                })
+                .collect::<Vec<_>>();
+            lines.extend(
+                render_wrapped_table(
+                    "Ineligible / Skipped Jobs",
+                    Some("These jobs will not be cancelled."),
+                    &[
+                        "JobID",
+                        "Name",
+                        "User",
+                        "Partition",
+                        "State",
+                        "Nodes",
+                        "Why not",
+                    ],
+                    &table_widths,
+                    &denied_rows,
+                    theme.cancel_frame,
+                    theme.muted,
+                    theme.muted,
+                    theme.muted,
+                )
+                .into_iter()
+                .map(Line::from),
+            );
         }
-    }
+        lines.push(Line::from(""));
+        lines.extend(render_kv_box(
+            "Action",
+            &[
+                kv_styled(
+                    "Will run",
+                    if preview.scope == crate::app::CancelScope::Single {
+                        "scancel for the selected job".to_string()
+                    } else {
+                        "scancel for every eligible job in this preview".to_string()
+                    },
+                    theme.cancel_frame,
+                    theme.warning,
+                ),
+                kv_styled(
+                    "Affected jobs",
+                    preview.allowed_count().to_string(),
+                    theme.success,
+                    theme.success,
+                ),
+                kv_styled(
+                    "Skipped jobs",
+                    preview
+                        .candidates
+                        .len()
+                        .saturating_sub(preview.allowed_count())
+                        .to_string(),
+                    theme.muted,
+                    theme.muted,
+                ),
+            ],
+            content_width,
+            false,
+            theme.cancel_frame,
+            theme.warning,
+            theme.warning,
+        ));
+        lines
+    });
+
+    let (offset, total_rows, start_line, end_line, visible_rows) =
+        scroll_metrics(body_lines.len(), layout[0].height, app.modal_scroll());
+    hit_map.set_page_rows(visible_rows);
+    let visible = body_lines
+        .iter()
+        .skip(offset)
+        .take(visible_rows)
+        .cloned()
+        .collect::<Vec<_>>();
     frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Preview"))
-            .wrap(Wrap { trim: true }),
-        top[1],
+        Paragraph::new(visible).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    "Confirm Cancel",
+                    theme.cancel_frame.add_modifier(Modifier::BOLD),
+                ))
+                .border_style(theme.cancel_frame),
+        ),
+        layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(format!(
+            "j/k move  Space/b page  g/G top/bottom  Enter/y confirm  q/Esc/n back  Lines {}-{} / {}",
+            start_line, end_line, total_rows
+        ))
+        .style(theme.muted)
+        .block(Block::default().borders(Borders::TOP)),
+        layout[1],
     );
 
     let buttons = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20),
-            Constraint::Length(20),
+            Constraint::Length(22),
+            Constraint::Length(22),
             Constraint::Min(1),
         ])
-        .split(top[2]);
+        .split(layout[2]);
     let confirm_rect = buttons[0];
     let cancel_rect = buttons[1];
     frame.render_widget(
@@ -2796,15 +3953,21 @@ fn render_cancel_confirm_modal(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .style(theme.danger)
-                    .title("Confirm"),
+                    .style(theme.cancel_frame)
+                    .title(Span::styled(
+                        "Confirm",
+                        theme.cancel_frame.add_modifier(Modifier::BOLD),
+                    )),
             ),
         confirm_rect,
     );
     frame.render_widget(
-        Paragraph::new("Back [Esc / n]")
+        Paragraph::new("Back [q / Esc / n]")
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title("Cancel")),
+            .block(Block::default().borders(Borders::ALL).title(Span::styled(
+                "Back",
+                theme.muted.add_modifier(Modifier::BOLD),
+            ))),
         cancel_rect,
     );
     hit_map.push(confirm_rect, MouseHit::Modal(ModalAction::Confirm));
@@ -2814,58 +3977,186 @@ fn render_cancel_confirm_modal(
 fn render_cancel_result_modal(
     frame: &mut Frame,
     report: &crate::app::CancelReport,
+    app: &AppState,
     theme: &Theme,
     hit_map: &mut UiHitMap,
 ) {
-    let area = centered_rect(70, 60, frame.area());
+    let area = centered_rect(84, 82, frame.area());
     frame.render_widget(Clear, area);
     hit_map.push(area, MouseHit::Modal(ModalAction::Ignore));
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!(
-                "{} cancel results: {} succeeded, {} failed",
-                match report.scope {
-                    crate::app::CancelScope::Single => "Single",
-                    crate::app::CancelScope::Visible => "Bulk",
-                },
-                report.succeeded(),
-                report.failed()
-            ),
-            theme.title.add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-    for outcome in report.results.iter().take(16) {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{:<8}", outcome.job_id),
-                if outcome.success {
-                    theme.success
-                } else {
-                    theme.danger
-                },
-            ),
-            Span::raw(" "),
-            Span::raw(&outcome.message),
-        ]));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from("Press Enter / Esc to close"));
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Cancel Result"),
-            )
-            .wrap(Wrap { trim: true }),
+    let failed_count = report
+        .results
+        .iter()
+        .filter(|result| !result.success && !is_skipped_message(&result.message))
+        .count();
+    let skipped_count = report
+        .results
+        .iter()
+        .filter(|result| !result.success && is_skipped_message(&result.message))
+        .count();
+    let result_frame = if failed_count > 0 {
+        theme.result_failure
+    } else if skipped_count > 0 {
+        theme.muted
+    } else {
+        theme.result_success
+    };
+
+    let body_lines = cached_detail_lines(app.modal_revision(), area.width, |content_width| {
+        let succeeded: Vec<_> = report
+            .results
+            .iter()
+            .filter(|result| result.success)
+            .collect();
+        let skipped: Vec<_> = report
+            .results
+            .iter()
+            .filter(|result| !result.success && is_skipped_message(&result.message))
+            .collect();
+        let failed: Vec<_> = report
+            .results
+            .iter()
+            .filter(|result| !result.success && !is_skipped_message(&result.message))
+            .collect();
+        let mut lines = Vec::new();
+        let result_frame = if !failed.is_empty() {
+            theme.result_failure
+        } else if !skipped.is_empty() {
+            theme.muted
+        } else {
+            theme.result_success
+        };
+        lines.extend(render_kv_box(
+            "Result Summary",
+            &[
+                kv_styled(
+                    "Scope",
+                    match report.scope {
+                        crate::app::CancelScope::Single => "single job".to_string(),
+                        crate::app::CancelScope::Visible => "visible filtered jobs".to_string(),
+                    },
+                    result_frame,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Total requests",
+                    report.results.len().to_string(),
+                    theme.title,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Succeeded",
+                    succeeded.len().to_string(),
+                    theme.result_success,
+                    theme.result_success,
+                ),
+                kv_styled(
+                    "Failed",
+                    failed.len().to_string(),
+                    theme.result_failure,
+                    theme.result_failure,
+                ),
+                kv_styled(
+                    "Skipped",
+                    skipped.len().to_string(),
+                    theme.muted,
+                    theme.muted,
+                ),
+            ],
+            content_width,
+            false,
+            result_frame,
+            result_frame,
+            result_frame,
+        ));
+        lines.push(Line::from(""));
+        let widths = vec![8, content_width.saturating_sub(8 + 5)];
+        if !succeeded.is_empty() {
+            let rows = succeeded
+                .iter()
+                .map(|outcome| vec![outcome.job_id.clone(), outcome.message.clone()])
+                .collect::<Vec<_>>();
+            lines.extend(
+                render_wrapped_table(
+                    "Succeeded",
+                    Some("These jobs were cancelled successfully."),
+                    &["JobID", "Message"],
+                    &widths,
+                    &rows,
+                    theme.result_success,
+                    theme.result_success,
+                    theme.result_success,
+                    theme.result_success,
+                )
+                .into_iter()
+                .map(Line::from),
+            );
+            lines.push(Line::from(""));
+        }
+        if !failed.is_empty() {
+            let rows = failed
+                .iter()
+                .map(|outcome| vec![outcome.job_id.clone(), outcome.message.clone()])
+                .collect::<Vec<_>>();
+            lines.extend(
+                render_wrapped_table(
+                    "Failed",
+                    Some("These jobs were not cancelled because scancel failed."),
+                    &["JobID", "Message"],
+                    &widths,
+                    &rows,
+                    theme.result_failure,
+                    theme.result_failure,
+                    theme.result_failure,
+                    theme.result_failure,
+                )
+                .into_iter()
+                .map(Line::from),
+            );
+            lines.push(Line::from(""));
+        }
+        if !skipped.is_empty() {
+            let rows = skipped
+                .iter()
+                .map(|outcome| vec![outcome.job_id.clone(), outcome.message.clone()])
+                .collect::<Vec<_>>();
+            lines.extend(
+                render_wrapped_table(
+                    "Skipped",
+                    Some("These jobs were intentionally left untouched."),
+                    &["JobID", "Message"],
+                    &widths,
+                    &rows,
+                    theme.muted,
+                    theme.muted,
+                    theme.muted,
+                    theme.muted,
+                )
+                .into_iter()
+                .map(Line::from),
+            );
+        }
+        lines
+    });
+
+    render_scrollable_detail_modal(
+        frame,
         area,
+        "Cancel Result",
+        body_lines,
+        "j/k move  Space/b page  g/G top/bottom  q Back  Wheel scroll",
+        app.modal_scroll(),
+        result_frame,
+        theme,
+        hit_map,
     );
 }
 
 fn register_table_rows(hit_map: &mut UiHitMap, area: Rect, row_count: usize, kind: RowKind) {
     let body_y = area.y.saturating_add(2);
     let width = area.width.saturating_sub(2);
+    let visible_rows = area.height.saturating_sub(3) as usize;
+    hit_map.set_page_rows(visible_rows.max(1));
     for index in 0..row_count {
         let row = body_y.saturating_add(index as u16);
         if row >= area.y.saturating_add(area.height.saturating_sub(1)) {
@@ -2904,57 +4195,6 @@ fn register_header_hits(
             hit_map.push(*rect, hit.clone());
         }
     }
-}
-
-fn render_kv_table(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    rows: &[(String, String)],
-    theme: &Theme,
-) {
-    let label_width = rows
-        .iter()
-        .map(|(label, _)| label.chars().count())
-        .max()
-        .unwrap_or(10)
-        .min(16);
-    let mut lines = Vec::new();
-    for (index, (label, value)) in rows.iter().enumerate() {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{label:label_width$}"),
-                theme.title.add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::raw(value.clone()),
-        ]));
-        if index + 1 != rows.len() {
-            lines.push(Line::from(""));
-        }
-    }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(title))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
-fn render_wrapped_field(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    lines: &[String],
-    theme: &Theme,
-) {
-    frame.render_widget(
-        Paragraph::new(lines.join("\n"))
-            .style(theme.muted)
-            .block(Block::default().borders(Borders::ALL).title(title))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }
 
 fn render_trend_panel(
@@ -3045,6 +4285,45 @@ fn max_segments(values: &[String], segment_width: usize) -> usize {
 
 fn segment_text(text: &str, segment: usize, width: usize) -> String {
     text.chars().skip(segment * width).take(width).collect()
+}
+
+fn wide_table_title(base: &str, hidden_left: usize, hidden_right: usize) -> String {
+    if hidden_left == 0 && hidden_right == 0 {
+        base.to_string()
+    } else {
+        format!(
+            "{base}  ← {} hidden  {} hidden →",
+            hidden_left, hidden_right
+        )
+    }
+}
+
+fn styled_stacked_bar_line(
+    first: u64,
+    second: u64,
+    capacity: Option<u64>,
+    width: usize,
+    first_label: &str,
+    second_label: &str,
+    first_style: Style,
+    second_style: Style,
+    theme: &Theme,
+) -> Line<'static> {
+    let capacity = capacity.unwrap_or((first + second).max(1)).max(1);
+    let first_width = scaled_bar_width(first, capacity, width);
+    let second_width =
+        scaled_bar_width(second, capacity, width).min(width.saturating_sub(first_width));
+    let blank = width.saturating_sub(first_width + second_width);
+    Line::from(vec![
+        Span::styled("[".to_string(), theme.muted),
+        Span::styled("█".repeat(first_width), first_style),
+        Span::styled("█".repeat(second_width), second_style),
+        Span::styled("·".repeat(blank), theme.muted),
+        Span::styled("]".to_string(), theme.muted),
+        Span::raw(format!(
+            "  {first_label}: {first}  {second_label}: {second}"
+        )),
+    ])
 }
 
 fn build_trend_lines(
@@ -3405,13 +4684,20 @@ fn scaled_bar_width(value: u64, capacity: u64, width: usize) -> usize {
     (((value as f64 / capacity.max(1) as f64) * width as f64).round() as usize).min(width)
 }
 
-fn build_node_state_lines(partition: &PartitionOverview, _theme: &Theme) -> Vec<Line<'static>> {
+fn build_node_state_lines(partition: &PartitionOverview, theme: &Theme) -> Vec<Line<'static>> {
     let total = partition.total_nodes.max(1) as u64;
     let mut lines = Vec::new();
     for key in ["idle", "mix", "alloc", "drain", "down"] {
         let count = *partition.node_state_counts.get(key).unwrap_or(&0) as u64;
+        let state_style = match key {
+            "idle" => theme.success,
+            "mix" | "alloc" => theme.running,
+            "drain" => theme.warning,
+            "down" => theme.danger,
+            _ => theme.muted,
+        };
         lines.push(Line::from(vec![
-            Span::raw(format!("{:<5} ", key)),
+            Span::styled(format!("{:<5} ", key), state_style),
             Span::raw(pressure_bar_text(count, Some(total), 12)),
             Span::raw(format!("  Nodes: {}", count)),
         ]));
@@ -3431,35 +4717,6 @@ fn pressure_bar_text(used: u64, capacity: Option<u64>, width: usize) -> String {
         "█".repeat(filled),
         "·".repeat(width.saturating_sub(filled)),
         ratio * 100.0
-    )
-}
-
-fn stacked_bar_text(mine: u64, other: u64, capacity: Option<u64>, width: usize) -> String {
-    stacked_bar_text_with_labels(mine, other, capacity, width, "Mine", "Others")
-}
-
-fn stacked_bar_text_with_labels(
-    first: u64,
-    second: u64,
-    capacity: Option<u64>,
-    width: usize,
-    first_label: &str,
-    second_label: &str,
-) -> String {
-    let capacity = capacity.unwrap_or((first + second).max(1)).max(1);
-    let first_width = scaled_bar_width(first, capacity, width);
-    let second_width =
-        scaled_bar_width(second, capacity, width).min(width.saturating_sub(first_width));
-    let blank = width.saturating_sub(first_width + second_width);
-    format!(
-        "[{}{}{}] {}: {}  {}: {}",
-        "█".repeat(first_width),
-        "▓".repeat(second_width),
-        "·".repeat(blank),
-        first_label,
-        first,
-        second_label,
-        second
     )
 }
 
@@ -3506,9 +4763,12 @@ fn job_state_style(job: &JobRecord, theme: &Theme) -> Style {
     }
 }
 
-fn footer_action_label(action: FooterAction) -> &'static str {
+fn footer_action_label(action: FooterAction, app: &AppState) -> &'static str {
     match action {
-        FooterAction::BackOverview => "← Overview (b)",
+        FooterAction::BackOverview => match app.current_page() {
+            Page::PartitionDetail | Page::NodeDetail | Page::UserJobs => "q Back",
+            _ => "← Overview",
+        },
         FooterAction::Refresh => "r Refresh",
         FooterAction::Help => "h Help",
         FooterAction::ToggleMine => "m Mine/All",

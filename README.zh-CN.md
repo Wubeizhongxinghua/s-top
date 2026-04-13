@@ -40,10 +40,7 @@
 - 保守的单任务/批量 `scancel` 流程
 - 鼠标支持：分页、表头排序、行选择、弹层操作
 
-## 截图
-
-README 已直接引用最终截图路径。后续只需把图片放入 `docs/screenshots/`，无需再调整文档结构。
-
+  
 ### Overview
 
 ![Overview](docs/screenshots/overview-hero.png)

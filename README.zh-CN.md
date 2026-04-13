@@ -42,69 +42,53 @@
 - 保守的单任务/批量 `scancel` 流程
 - 鼠标支持：分页、表头排序、行选择、弹层操作
 
-  
 ### Overview
+
+默认首页，展示分区压力、归属拆分、运行/排队统计以及全局趋势。
 
 ![Overview](docs/screenshots/overview-hero.png)
 
 ### My Jobs
 
-![My Jobs](docs/screenshots/my-jobs.png)
-
-### All Jobs
-
-![All Jobs](docs/screenshots/all-jobs.png)
-
-### Users
-
-![Users](docs/screenshots/users.png)
-
-### Partition Detail
-
-![Partition Detail](docs/screenshots/partition-detail.png)
-
-### Node Detail
-
-![Node Detail](docs/screenshots/node-detail.png)
-
-### Job Detail
-
-![Job Detail](docs/screenshots/job-detail.png)
-
-### Cancel Preview
-
-![Cancel Preview](docs/screenshots/cancel-preview.png)
-
-
-## 页面说明
-
-### Overview
-
-默认首页，展示分区压力、归属拆分、运行/排队统计以及全局趋势。
-
-### My Jobs
-
 展示当前用户的活跃任务，适合日常查看与任务操作。
+
+![My Jobs](docs/screenshots/my-jobs.png)
 
 ### All Jobs
 
 展示全局活跃队列，并对当前用户的任务做高亮区分。
 
+![All Jobs](docs/screenshots/all-jobs.png)
+
 ### Users
 
 展示用户级别的运行任务数、排队任务数、总任务数、资源占用以及主要分区；下方区域显示所选用户的活跃任务。
+
+![Users](docs/screenshots/users.png)
 
 ### Partition Detail
 
 展示单个分区的详细视图，包括趋势、节点状态分布、节点列表以及该分区下的任务。
 
+![Partition Detail](docs/screenshots/partition-detail.png)
+
 ### Node Detail
 
 展示单个节点上的任务列表，并支持 `user`、`state`、`where`、`why` 交互式筛选。
 
+![Node Detail](docs/screenshots/node-detail.png)
+
 ### Job Detail
 
 以结构化弹层展示任务详情，按字段用途分组，而不是输出难以阅读的纯文本块。
+
+![Job Detail](docs/screenshots/job-detail.png)
+
+### Cancel Preview
+
+在真正执行取消前展示待处理任务集合，并明确区分允许取消与禁止取消的任务。
+
+![Cancel Preview](docs/screenshots/cancel-preview.png)
 
 ## 安装
 

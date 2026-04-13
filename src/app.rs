@@ -1627,7 +1627,12 @@ impl AppState {
             KeyCode::Left => {
                 if matches!(
                     self.current_page(),
-                    Page::MyJobs | Page::AllJobs | Page::PartitionDetail | Page::NodeDetail
+                    Page::Overview
+                        | Page::MyJobs
+                        | Page::Users
+                        | Page::AllJobs
+                        | Page::PartitionDetail
+                        | Page::NodeDetail
                 ) {
                     self.job_horizontal_offset = self.job_horizontal_offset.saturating_sub(1);
                 }
@@ -1635,7 +1640,12 @@ impl AppState {
             KeyCode::Right => {
                 if matches!(
                     self.current_page(),
-                    Page::MyJobs | Page::AllJobs | Page::PartitionDetail | Page::NodeDetail
+                    Page::Overview
+                        | Page::MyJobs
+                        | Page::Users
+                        | Page::AllJobs
+                        | Page::PartitionDetail
+                        | Page::NodeDetail
                 ) {
                     self.job_horizontal_offset = self.job_horizontal_offset.saturating_add(1);
                 }

@@ -214,47 +214,193 @@ fn render_overview(
         .map(|partition| partition.total_usage().pending_total(app.metric_mode))
         .max()
         .unwrap_or(1);
-    let table_rows: Vec<Row> = rows
+    let partition_segment_width = adaptive_segment_width(sections[1].width, 18, 10);
+    let summary_segment_width = adaptive_segment_width(sections[1].width, 24, 12);
+    let resource_segment_width = adaptive_segment_width(sections[1].width, 24, 12);
+    let pressure_width = adaptive_segment_width(sections[1].width, 23, 12) as u16;
+    let metric_width = adaptive_segment_width(sections[1].width, 18, 12) as u16;
+    let pressure_bar_width = pressure_width.saturating_sub(7).max(3) as usize;
+    let running_digits = running_capacity.max(1).to_string().len();
+    let pending_digits = pending_capacity.max(1).to_string().len();
+    let running_metric_bar_width = metric_width
+        .saturating_sub((running_digits + 4) as u16)
+        .max(3) as usize;
+    let pending_metric_bar_width = metric_width
+        .saturating_sub((pending_digits + 4) as u16)
+        .max(3) as usize;
+    let state_values = rows
+        .iter()
+        .map(|partition| partition.state.clone())
+        .collect::<Vec<_>>();
+    let partition_names = rows
+        .iter()
+        .map(|partition| partition.name.clone())
+        .collect::<Vec<_>>();
+    let total_job_texts = rows
         .iter()
         .map(|partition| {
-            let usage = partition.used_for_pressure(app.metric_mode);
-            let pressure = pressure_bar_cell(partition, app.metric_mode, theme, 18);
+            format!(
+                "Running: {}  Pending: {}",
+                partition.total_usage().running_total(MetricMode::Jobs),
+                partition.total_usage().pending_total(MetricMode::Jobs),
+            )
+        })
+        .collect::<Vec<_>>();
+    let resource_texts = rows
+        .iter()
+        .map(|partition| {
+            format_partition_resources(
+                partition,
+                app.metric_mode,
+                partition.used_for_pressure(app.metric_mode),
+            )
+        })
+        .collect::<Vec<_>>();
+    let partition_segments = max_segments(&partition_names, partition_segment_width);
+    let total_segments = max_segments(&total_job_texts, summary_segment_width);
+    let resource_segments = max_segments(&resource_texts, resource_segment_width);
+    let state_width = adaptive_text_width(&state_values, sections[1].width, 8, 18, 8);
+
+    let mut headers = Vec::new();
+    let mut column_widths = Vec::new();
+    let mut header_hits = Vec::new();
+    for segment in 0..partition_segments {
+        headers.push(sortable_header(
+            if partition_segments > 1 && segment > 0 {
+                "Partition →"
+            } else {
+                "Partition"
+            },
+            app.overview_sort.column == OverviewColumn::Partition,
+            app.overview_sort.direction,
+            theme,
+        ));
+        column_widths.push(partition_segment_width as u16);
+        header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::Partition)));
+    }
+    headers.push(Line::from("State"));
+    column_widths.push(state_width);
+    header_hits.push(None);
+    headers.push(sortable_header(
+        "Nodes",
+        app.overview_sort.column == OverviewColumn::Nodes,
+        app.overview_sort.direction,
+        theme,
+    ));
+    column_widths.push(7);
+    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::Nodes)));
+    headers.push(sortable_header(
+        "Pressure",
+        app.overview_sort.column == OverviewColumn::Pressure,
+        app.overview_sort.direction,
+        theme,
+    ));
+    column_widths.push(pressure_width);
+    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::Pressure)));
+    headers.push(sortable_header(
+        "Mine Running",
+        app.overview_sort.column == OverviewColumn::MineRunning,
+        app.overview_sort.direction,
+        theme,
+    ));
+    column_widths.push(metric_width);
+    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::MineRunning)));
+    headers.push(sortable_header(
+        "Mine Pending",
+        app.overview_sort.column == OverviewColumn::MinePending,
+        app.overview_sort.direction,
+        theme,
+    ));
+    column_widths.push(metric_width);
+    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::MinePending)));
+    headers.push(sortable_header(
+        "Others Running",
+        app.overview_sort.column == OverviewColumn::OthersRunning,
+        app.overview_sort.direction,
+        theme,
+    ));
+    column_widths.push(metric_width);
+    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::OthersRunning)));
+    headers.push(sortable_header(
+        "Others Pending",
+        app.overview_sort.column == OverviewColumn::OthersPending,
+        app.overview_sort.direction,
+        theme,
+    ));
+    column_widths.push(metric_width);
+    header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::OthersPending)));
+    for segment in 0..total_segments {
+        headers.push(sortable_header(
+            if total_segments > 1 && segment > 0 {
+                "Total Jobs →"
+            } else {
+                "Total Jobs"
+            },
+            app.overview_sort.column == OverviewColumn::TotalJobs,
+            app.overview_sort.direction,
+            theme,
+        ));
+        column_widths.push(summary_segment_width as u16);
+        header_hits.push(Some(MouseHit::OverviewHeader(OverviewColumn::TotalJobs)));
+    }
+    for segment in 0..resource_segments {
+        headers.push(Line::from(if resource_segments > 1 && segment > 0 {
+            "Resources →"
+        } else {
+            "Resources"
+        }));
+        column_widths.push(resource_segment_width as u16);
+        header_hits.push(None);
+    }
+
+    let full_rows: Vec<(Vec<Cell>, Style)> = rows
+        .iter()
+        .zip(total_job_texts.iter().zip(resource_texts.iter()))
+        .map(|(partition, (total_jobs, resources))| {
+            let pressure = pressure_bar_cell(
+                partition,
+                app.metric_mode,
+                theme,
+                pressure_bar_width,
+            );
             let mine_running = metric_value_line(
                 partition.mine.running_total(app.metric_mode),
                 running_capacity,
-                8,
+                running_metric_bar_width,
                 theme.mine,
                 theme,
             );
             let mine_pending = metric_value_line(
                 partition.mine.pending_total(app.metric_mode),
                 pending_capacity,
-                8,
+                pending_metric_bar_width,
                 theme.mine,
                 theme,
             );
             let others_running = metric_value_line(
                 partition.others.running_total(app.metric_mode),
                 running_capacity,
-                8,
+                running_metric_bar_width,
                 theme.other,
                 theme,
             );
             let others_pending = metric_value_line(
                 partition.others.pending_total(app.metric_mode),
                 pending_capacity,
-                8,
+                pending_metric_bar_width,
                 theme.other,
                 theme,
             );
-            let resources = format_partition_resources(partition, app.metric_mode, usage);
-            Row::new(vec![
-                Cell::from(Line::from(vec![Span::styled(
-                    partition.name.clone(),
+            let mut cells = Vec::new();
+            for segment in 0..partition_segments {
+                cells.push(Cell::from(Line::from(vec![Span::styled(
+                    segment_text(&partition.name, segment, partition_segment_width),
                     theme
                         .partition_style(&partition.name)
                         .add_modifier(Modifier::BOLD),
-                )])),
+                )])));
+            }
+            cells.extend([
                 Cell::from(partition.state.clone()),
                 Cell::from(partition.total_nodes.to_string()),
                 Cell::from(pressure),
@@ -262,87 +408,63 @@ fn render_overview(
                 Cell::from(mine_pending),
                 Cell::from(others_running),
                 Cell::from(others_pending),
-                Cell::from(format!(
-                    "Running: {}  Pending: {}",
-                    partition.total_usage().running_total(MetricMode::Jobs),
-                    partition.total_usage().pending_total(MetricMode::Jobs),
-                )),
-                Cell::from(resources),
-            ])
-            .style(partition_state_style(partition, theme))
+            ]);
+            for segment in 0..total_segments {
+                cells.push(Cell::from(segment_text(
+                    total_jobs,
+                    segment,
+                    summary_segment_width,
+                )));
+            }
+            for segment in 0..resource_segments {
+                cells.push(Cell::from(segment_text(
+                    resources,
+                    segment,
+                    resource_segment_width,
+                )));
+            }
+            (cells, partition_state_style(partition, theme))
         })
         .collect();
 
-    let constraints = [
-        Constraint::Length(12),
-        Constraint::Length(8),
-        Constraint::Length(7),
-        Constraint::Length(23),
-        Constraint::Length(18),
-        Constraint::Length(18),
-        Constraint::Length(18),
-        Constraint::Length(18),
-        Constraint::Length(21),
-        Constraint::Min(22),
-    ];
-    let headers = vec![
-        sortable_header(
-            "Partition",
-            app.overview_sort.column == OverviewColumn::Partition,
-            app.overview_sort.direction,
-            theme,
-        ),
-        Line::from("State"),
-        sortable_header(
-            "Nodes",
-            app.overview_sort.column == OverviewColumn::Nodes,
-            app.overview_sort.direction,
-            theme,
-        ),
-        sortable_header(
-            "Pressure",
-            app.overview_sort.column == OverviewColumn::Pressure,
-            app.overview_sort.direction,
-            theme,
-        ),
-        sortable_header(
-            "Mine Running",
-            app.overview_sort.column == OverviewColumn::MineRunning,
-            app.overview_sort.direction,
-            theme,
-        ),
-        sortable_header(
-            "Mine Pending",
-            app.overview_sort.column == OverviewColumn::MinePending,
-            app.overview_sort.direction,
-            theme,
-        ),
-        sortable_header(
-            "Others Running",
-            app.overview_sort.column == OverviewColumn::OthersRunning,
-            app.overview_sort.direction,
-            theme,
-        ),
-        sortable_header(
-            "Others Pending",
-            app.overview_sort.column == OverviewColumn::OthersPending,
-            app.overview_sort.direction,
-            theme,
-        ),
-        sortable_header(
-            "Total Jobs",
-            app.overview_sort.column == OverviewColumn::TotalJobs,
-            app.overview_sort.direction,
-            theme,
-        ),
-        Line::from("Resources"),
-    ];
+    let (visible_indices, hidden_left, hidden_right) = visible_column_indices(
+        &column_widths,
+        sections[1].width.saturating_sub(4),
+        app.job_horizontal_offset,
+    );
+    let constraints = visible_indices
+        .iter()
+        .map(|index| Constraint::Length(column_widths[*index]))
+        .collect::<Vec<_>>();
+    let visible_headers = visible_indices
+        .iter()
+        .map(|index| headers[*index].clone())
+        .collect::<Vec<_>>();
+    let visible_hits = visible_indices
+        .iter()
+        .map(|index| header_hits[*index].clone())
+        .collect::<Vec<_>>();
+    let table_rows: Vec<Row> = full_rows
+        .into_iter()
+        .map(|(cells, style)| {
+            Row::new(
+                visible_indices
+                    .iter()
+                    .map(|index| cells[*index].clone())
+                    .collect::<Vec<_>>(),
+            )
+            .style(style)
+        })
+        .collect();
 
     let table = Table::new(table_rows, constraints.clone())
-        .header(Row::new(headers).style(theme.title.add_modifier(Modifier::BOLD)))
+        .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
         .block(
             Block::default()
-                .title("Partition Overview")
+                .title(format!(
+                    "Partition Overview  Hidden left: {}  Hidden right: {}",
+                    hidden_left, hidden_right
+                ))
                 .borders(Borders::ALL),
         )
         .row_highlight_style(theme.highlight)
@@ -360,18 +482,7 @@ fn render_overview(
         hit_map,
         sections[1],
         &constraints,
-        &[
-            Some(MouseHit::OverviewHeader(OverviewColumn::Partition)),
-            None,
-            Some(MouseHit::OverviewHeader(OverviewColumn::Nodes)),
-            Some(MouseHit::OverviewHeader(OverviewColumn::Pressure)),
-            Some(MouseHit::OverviewHeader(OverviewColumn::MineRunning)),
-            Some(MouseHit::OverviewHeader(OverviewColumn::MinePending)),
-            Some(MouseHit::OverviewHeader(OverviewColumn::OthersRunning)),
-            Some(MouseHit::OverviewHeader(OverviewColumn::OthersPending)),
-            Some(MouseHit::OverviewHeader(OverviewColumn::TotalJobs)),
-            None,
-        ],
+        &visible_hits,
     );
 }
 
@@ -552,14 +663,16 @@ fn render_jobs(
 
     let show_user = !mine_only;
     let resource_scale = JobResourceScale::from_jobs(&rows);
+    let resource_segment_width = adaptive_segment_width(sections[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let name_segment_width = adaptive_segment_width(sections[1].width, NAME_SEGMENT_WIDTH, 12);
     let resource_texts = rows
         .iter()
         .map(|job| resource_footprint_text(job, &resource_scale))
         .collect::<Vec<_>>();
-    let resource_segments = max_segments(&resource_texts, RESOURCE_SEGMENT_WIDTH);
+    let resource_segments = max_segments(&resource_texts, resource_segment_width);
     let name_segments = max_segments(
         &rows.iter().map(|job| job.name.clone()).collect::<Vec<_>>(),
-        NAME_SEGMENT_WIDTH,
+        name_segment_width,
     );
     let where_width = rows
         .iter()
@@ -647,7 +760,7 @@ fn render_jobs(
             app.job_sort.direction,
             theme,
         ));
-        column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
+        column_widths.push(resource_segment_width as u16);
         header_hits.push(None);
     }
     headers.push(sortable_header(
@@ -671,7 +784,7 @@ fn render_jobs(
             app.job_sort.direction,
             theme,
         ));
-        column_widths.push(NAME_SEGMENT_WIDTH as u16);
+        column_widths.push(name_segment_width as u16);
         header_hits.push(Some(MouseHit::JobHeader(JobColumn::Name)));
     }
 
@@ -705,7 +818,7 @@ fn render_jobs(
                 cells.push(Cell::from(segment_text(
                     resource_text,
                     segment,
-                    RESOURCE_SEGMENT_WIDTH,
+                    resource_segment_width,
                 )));
             }
             cells.push(Cell::from(job.location_or_reason.clone()));
@@ -713,7 +826,7 @@ fn render_jobs(
                 cells.push(Cell::from(segment_text(
                     &job.name,
                     segment,
-                    NAME_SEGMENT_WIDTH,
+                    name_segment_width,
                 )));
             }
             cells
@@ -831,16 +944,20 @@ fn render_users(
     );
 
     let user_scale = UserResourceScale::from_users(&users);
+    let footprint_segment_width =
+        adaptive_segment_width(sections[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let partition_segment_width =
+        adaptive_segment_width(sections[1].width, PARTITION_SEGMENT_WIDTH, 12);
     let user_footprints = users
         .iter()
         .map(|usage| user_resource_footprint_text(usage, &user_scale))
         .collect::<Vec<_>>();
-    let footprint_segments = max_segments(&user_footprints, RESOURCE_SEGMENT_WIDTH);
+    let footprint_segments = max_segments(&user_footprints, footprint_segment_width);
     let partition_texts = users
         .iter()
         .map(|usage| usage.top_partitions_summary(3))
         .collect::<Vec<_>>();
-    let partition_segments = max_segments(&partition_texts, PARTITION_SEGMENT_WIDTH);
+    let partition_segments = max_segments(&partition_texts, partition_segment_width);
     let mut headers = vec![
         sortable_header(
             "User",
@@ -885,7 +1002,7 @@ fn render_users(
             app.user_sort.direction,
             theme,
         ));
-        column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
+        column_widths.push(footprint_segment_width as u16);
         header_hits.push(Some(MouseHit::UserHeader(UserColumn::ResourceFootprint)));
     }
     for segment in 0..partition_segments {
@@ -899,7 +1016,7 @@ fn render_users(
             app.user_sort.direction,
             theme,
         ));
-        column_widths.push(PARTITION_SEGMENT_WIDTH as u16);
+        column_widths.push(partition_segment_width as u16);
         header_hits.push(Some(MouseHit::UserHeader(UserColumn::Partitions)));
     }
     let full_rows: Vec<Vec<Cell>> = users
@@ -923,14 +1040,14 @@ fn render_users(
                 cells.push(Cell::from(segment_text(
                     footprint,
                     segment,
-                    RESOURCE_SEGMENT_WIDTH,
+                    footprint_segment_width,
                 )));
             }
             for segment in 0..partition_segments {
                 cells.push(Cell::from(segment_text(
                     partition_text,
                     segment,
-                    PARTITION_SEGMENT_WIDTH,
+                    partition_segment_width,
                 )));
             }
             cells
@@ -1016,22 +1133,26 @@ fn render_users(
     } else {
         vec![Line::from("No active user matches the current filters")]
     };
+    let lower = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(5)])
+        .split(sections[2]);
+    let selected_resource_segment_width =
+        adaptive_segment_width(lower[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let selected_name_segment_width =
+        adaptive_segment_width(lower[1].width, NAME_SEGMENT_WIDTH, 12);
     let selected_resource_texts = selected_jobs
         .iter()
         .map(|job| resource_footprint_text(job, &resource_scale))
         .collect::<Vec<_>>();
-    let resource_segments = max_segments(&selected_resource_texts, RESOURCE_SEGMENT_WIDTH);
+    let resource_segments = max_segments(&selected_resource_texts, selected_resource_segment_width);
     let name_segments = max_segments(
         &selected_jobs
             .iter()
             .map(|job| job.name.clone())
             .collect::<Vec<_>>(),
-        NAME_SEGMENT_WIDTH,
+        selected_name_segment_width,
     );
-    let lower = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(5)])
-        .split(sections[2]);
     frame.render_widget(
         Paragraph::new(summary_lines)
             .block(
@@ -1055,7 +1176,7 @@ fn render_users(
         } else {
             "Resource footprint"
         }));
-        column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
+        column_widths.push(selected_resource_segment_width as u16);
     }
     for segment in 0..name_segments {
         headers.push(Line::from(if name_segments > 1 && segment > 0 {
@@ -1063,7 +1184,7 @@ fn render_users(
         } else {
             "Name"
         }));
-        column_widths.push(NAME_SEGMENT_WIDTH as u16);
+        column_widths.push(selected_name_segment_width as u16);
     }
     let full_rows: Vec<Vec<Cell>> = selected_jobs
         .iter()
@@ -1082,14 +1203,14 @@ fn render_users(
                 cells.push(Cell::from(segment_text(
                     resource_text,
                     segment,
-                    RESOURCE_SEGMENT_WIDTH,
+                    selected_resource_segment_width,
                 )));
             }
             for segment in 0..name_segments {
                 cells.push(Cell::from(segment_text(
                     &job.name,
                     segment,
-                    NAME_SEGMENT_WIDTH,
+                    selected_name_segment_width,
                 )));
             }
             cells
@@ -1160,14 +1281,16 @@ fn render_partition_detail(
 
     let jobs = app.visible_partition_jobs(&partition.name);
     let resource_scale = JobResourceScale::from_jobs(&jobs);
+    let resource_segment_width = adaptive_segment_width(layout[1].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let name_segment_width = adaptive_segment_width(layout[1].width, NAME_SEGMENT_WIDTH, 12);
     let resource_texts = jobs
         .iter()
         .map(|job| resource_footprint_text(job, &resource_scale))
         .collect::<Vec<_>>();
-    let resource_segments = max_segments(&resource_texts, RESOURCE_SEGMENT_WIDTH);
+    let resource_segments = max_segments(&resource_texts, resource_segment_width);
     let name_segments = max_segments(
         &jobs.iter().map(|job| job.name.clone()).collect::<Vec<_>>(),
-        NAME_SEGMENT_WIDTH,
+        name_segment_width,
     );
     let where_width = jobs
         .iter()
@@ -1226,7 +1349,7 @@ fn render_partition_detail(
             app.job_sort.direction,
             theme,
         ));
-        column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
+        column_widths.push(resource_segment_width as u16);
         header_hits.push(None);
     }
     for segment in 0..name_segments {
@@ -1240,7 +1363,7 @@ fn render_partition_detail(
             app.job_sort.direction,
             theme,
         ));
-        column_widths.push(NAME_SEGMENT_WIDTH as u16);
+        column_widths.push(name_segment_width as u16);
         header_hits.push(Some(MouseHit::JobHeader(JobColumn::Name)));
     }
     let full_rows: Vec<Vec<Cell>> = jobs
@@ -1261,14 +1384,14 @@ fn render_partition_detail(
                 cells.push(Cell::from(segment_text(
                     resource_text,
                     segment,
-                    RESOURCE_SEGMENT_WIDTH,
+                    resource_segment_width,
                 )));
             }
             for segment in 0..name_segments {
                 cells.push(Cell::from(segment_text(
                     &job.name,
                     segment,
-                    NAME_SEGMENT_WIDTH,
+                    name_segment_width,
                 )));
             }
             cells
@@ -1450,24 +1573,6 @@ fn render_partition_detail_summary(
     );
 
     let nodes = app.visible_partition_nodes(&partition.name);
-    let node_rows: Vec<Row> = nodes
-        .iter()
-        .map(|node| {
-            Row::new(vec![
-                Cell::from(node.node_name.clone()),
-                Cell::from(node.state.clone()),
-                Cell::from(format!(
-                    "CPUs {}  GPUs {}",
-                    node.cpus
-                        .map(|value| value.to_string())
-                        .unwrap_or_else(|| "N/A".to_string()),
-                    node.gpus
-                        .map(|value| value.to_string())
-                        .unwrap_or_else(|| "N/A".to_string())
-                )),
-            ])
-        })
-        .collect();
     let mut node_state = TableState::default();
     node_state.select(if nodes.is_empty() {
         None
@@ -1477,25 +1582,97 @@ fn render_partition_detail_summary(
                 .min(nodes.len().saturating_sub(1)),
         )
     });
+    let node_names = nodes
+        .iter()
+        .map(|node| node.node_name.clone())
+        .collect::<Vec<_>>();
+    let node_name_width = adaptive_text_width(&node_names, trend_and_nodes[1].width, 10, 40, 12);
+    let node_state_values = nodes
+        .iter()
+        .map(|node| node.state.clone())
+        .collect::<Vec<_>>();
+    let node_state_width =
+        adaptive_text_width(&node_state_values, trend_and_nodes[1].width, 8, 18, 9);
+    let capacity_texts = nodes
+        .iter()
+        .map(|node| {
+            format!(
+                "CPUs {}  GPUs {}",
+                node.cpus
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "N/A".to_string()),
+                node.gpus
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "N/A".to_string())
+            )
+        })
+        .collect::<Vec<_>>();
+    let capacity_segment_width =
+        adaptive_segment_width(trend_and_nodes[1].width, 24, 12);
+    let capacity_segments = max_segments(&capacity_texts, capacity_segment_width);
+    let mut headers = vec![Line::from("Node"), Line::from("State")];
+    let mut column_widths = vec![node_name_width, node_state_width];
+    for segment in 0..capacity_segments {
+        headers.push(Line::from(if capacity_segments > 1 && segment > 0 {
+            "Capacity →"
+        } else {
+            "Capacity"
+        }));
+        column_widths.push(capacity_segment_width as u16);
+    }
+    let full_rows: Vec<Vec<Cell>> = nodes
+        .iter()
+        .zip(capacity_texts.iter())
+        .map(|(node, capacity_text)| {
+            let mut cells = vec![
+                Cell::from(node.node_name.clone()),
+                Cell::from(node.state.clone()),
+            ];
+            for segment in 0..capacity_segments {
+                cells.push(Cell::from(segment_text(
+                    capacity_text,
+                    segment,
+                    capacity_segment_width,
+                )));
+            }
+            cells
+        })
+        .collect();
+    let (visible_indices, hidden_left, hidden_right) = visible_column_indices(
+        &column_widths,
+        trend_and_nodes[1].width.saturating_sub(4),
+        app.job_horizontal_offset,
+    );
+    let constraints = visible_indices
+        .iter()
+        .map(|index| Constraint::Length(column_widths[*index]))
+        .collect::<Vec<_>>();
+    let visible_headers = visible_indices
+        .iter()
+        .map(|index| headers[*index].clone())
+        .collect::<Vec<_>>();
+    let visible_rows = full_rows
+        .into_iter()
+        .map(|cells| {
+            Row::new(
+                visible_indices
+                    .iter()
+                    .map(|index| cells[*index].clone())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
     frame.render_stateful_widget(
-        Table::new(
-            node_rows,
-            [
-                Constraint::Length(12),
-                Constraint::Length(9),
-                Constraint::Min(16),
-            ],
-        )
-        .header(
-            Row::new(["Node", "State", "Capacity"]).style(theme.title.add_modifier(Modifier::BOLD)),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Nodes in this Partition"),
-        )
-        .row_highlight_style(theme.highlight)
-        .highlight_symbol(">> "),
+        Table::new(visible_rows, constraints)
+            .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
+            .block(
+                Block::default().borders(Borders::ALL).title(format!(
+                    "Nodes in this Partition  Hidden left: {}  Hidden right: {}",
+                    hidden_left, hidden_right
+                )),
+            )
+            .row_highlight_style(theme.highlight)
+            .highlight_symbol(">> "),
         trend_and_nodes[1],
         &mut node_state,
     );
@@ -1635,14 +1812,17 @@ fn render_node_detail(
 
     let jobs = app.visible_node_jobs();
     let resource_scale = JobResourceScale::from_jobs(&jobs);
+    let resource_segment_width =
+        adaptive_segment_width(sections[2].width, RESOURCE_SEGMENT_WIDTH, 12);
+    let name_segment_width = adaptive_segment_width(sections[2].width, NAME_SEGMENT_WIDTH, 12);
     let resource_texts = jobs
         .iter()
         .map(|job| resource_footprint_text(job, &resource_scale))
         .collect::<Vec<_>>();
-    let resource_segments = max_segments(&resource_texts, RESOURCE_SEGMENT_WIDTH);
+    let resource_segments = max_segments(&resource_texts, resource_segment_width);
     let name_segments = max_segments(
         &jobs.iter().map(|job| job.name.clone()).collect::<Vec<_>>(),
-        NAME_SEGMENT_WIDTH,
+        name_segment_width,
     );
     let partition_width = jobs
         .iter()
@@ -1723,7 +1903,7 @@ fn render_node_detail(
             app.job_sort.direction,
             theme,
         ));
-        column_widths.push(RESOURCE_SEGMENT_WIDTH as u16);
+        column_widths.push(resource_segment_width as u16);
         header_hits.push(None);
     }
     for segment in 0..name_segments {
@@ -1737,7 +1917,7 @@ fn render_node_detail(
             app.job_sort.direction,
             theme,
         ));
-        column_widths.push(NAME_SEGMENT_WIDTH as u16);
+        column_widths.push(name_segment_width as u16);
         header_hits.push(Some(MouseHit::JobHeader(JobColumn::Name)));
     }
     let full_rows: Vec<Vec<Cell>> = jobs
@@ -1768,14 +1948,14 @@ fn render_node_detail(
                 cells.push(Cell::from(segment_text(
                     resource_text,
                     segment,
-                    RESOURCE_SEGMENT_WIDTH,
+                    resource_segment_width,
                 )));
             }
             for segment in 0..name_segments {
                 cells.push(Cell::from(segment_text(
                     &job.name,
                     segment,
-                    NAME_SEGMENT_WIDTH,
+                    name_segment_width,
                 )));
             }
             cells
@@ -1886,18 +2066,53 @@ fn render_history(
     }
 
     let rows = app.visible_history();
-    let table_rows: Vec<Row> = rows
+
+    let history_name_segment_width = adaptive_segment_width(sections[1].width, NAME_SEGMENT_WIDTH, 12);
+    let history_partition_width = adaptive_text_width(
+        &rows
+            .iter()
+            .map(|history| history.partition.clone().unwrap_or_else(|| "-".to_string()))
+            .collect::<Vec<_>>(),
+        sections[1].width,
+        10,
+        28,
+        12,
+    );
+    let history_name_segments = max_segments(
+        &rows.iter().map(|history| history.name.clone()).collect::<Vec<_>>(),
+        history_name_segment_width,
+    );
+    let resource_width = adaptive_segment_width(sections[1].width, 18, 12) as u16;
+    let mut column_widths = vec![8, 10, history_partition_width, 12, 8, 10, 19];
+    let mut headers = vec![
+        Line::from("JobID"),
+        Line::from("User"),
+        Line::from("Partition"),
+        Line::from("State"),
+        Line::from("Exit"),
+        Line::from("Elapsed"),
+        Line::from("End"),
+    ];
+    if app.settings.show_advanced_resources {
+        column_widths.push(resource_width);
+        headers.push(Line::from("AllocTRES"));
+    }
+    for segment in 0..history_name_segments {
+        headers.push(Line::from(if history_name_segments > 1 && segment > 0 {
+            "Name →"
+        } else {
+            "Name"
+        }));
+        column_widths.push(history_name_segment_width as u16);
+    }
+    let full_rows: Vec<Vec<Cell>> = rows
         .iter()
         .map(|history| {
             let mut cells = vec![
                 Cell::from(history.job_id.clone()),
                 Cell::from(Line::from(vec![Span::styled(
                     history.user.clone(),
-                    if history.is_mine {
-                        theme.mine
-                    } else {
-                        theme.other
-                    },
+                    if history.is_mine { theme.mine } else { theme.other },
                 )])),
                 Cell::from(history.partition.clone().unwrap_or_else(|| "-".to_string())),
                 Cell::from(history.state.clone()),
@@ -1908,8 +2123,40 @@ fn render_history(
             if app.settings.show_advanced_resources {
                 cells.push(Cell::from(history.resources_summary()));
             }
-            cells.push(Cell::from(history.name.clone()));
-            Row::new(cells).style(if history.is_mine {
+            for segment in 0..history_name_segments {
+                cells.push(Cell::from(segment_text(
+                    &history.name,
+                    segment,
+                    history_name_segment_width,
+                )));
+            }
+            cells
+        })
+        .collect();
+    let (visible_indices, hidden_left, hidden_right) = visible_column_indices(
+        &column_widths,
+        sections[1].width.saturating_sub(4),
+        app.job_horizontal_offset,
+    );
+    let constraints = visible_indices
+        .iter()
+        .map(|index| Constraint::Length(column_widths[*index]))
+        .collect::<Vec<_>>();
+    let visible_headers = visible_indices
+        .iter()
+        .map(|index| headers[*index].clone())
+        .collect::<Vec<_>>();
+    let visible_rows: Vec<Row> = rows
+        .iter()
+        .zip(full_rows.iter())
+        .map(|(history, cells)| {
+            Row::new(
+                visible_indices
+                    .iter()
+                    .map(|index| cells[*index].clone())
+                    .collect::<Vec<_>>(),
+            )
+            .style(if history.is_mine {
                 theme.mine
             } else {
                 theme.other
@@ -1917,37 +2164,12 @@ fn render_history(
         })
         .collect();
 
-    let mut constraints = vec![
-        Constraint::Length(8),
-        Constraint::Length(10),
-        Constraint::Length(11),
-        Constraint::Length(12),
-        Constraint::Length(8),
-        Constraint::Length(10),
-        Constraint::Length(19),
-    ];
-    let mut headers = vec![
-        "JobID",
-        "User",
-        "Partition",
-        "State",
-        "Exit",
-        "Elapsed",
-        "End",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect::<Vec<_>>();
-    if app.settings.show_advanced_resources {
-        constraints.push(Constraint::Length(18));
-        headers.push("AllocTRES".to_string());
-    }
-    constraints.push(Constraint::Min(20));
-    headers.push("Name".to_string());
-
-    let table = Table::new(table_rows, constraints)
-        .header(Row::new(headers).style(theme.title.add_modifier(Modifier::BOLD)))
-        .block(Block::default().borders(Borders::ALL).title("History Jobs"))
+    let table = Table::new(visible_rows, constraints)
+        .header(Row::new(visible_headers).style(theme.title.add_modifier(Modifier::BOLD)))
+        .block(Block::default().borders(Borders::ALL).title(format!(
+            "History Jobs  Hidden left: {}  Hidden right: {}",
+            hidden_left, hidden_right
+        )))
         .row_highlight_style(theme.highlight)
         .highlight_symbol(">> ");
     let mut state = TableState::default();
@@ -1983,7 +2205,7 @@ fn render_footer(
     render_footer_actions(frame, sections[0], app, theme, hit_map);
 
     let nav = format!(
-        "Navigation: Tab switch pages  j/k move selection  Enter open detail  i show job detail  Left / Right move horizontal view  Mouse click or double-click  Wheel scroll"
+        "Navigation: Tab switch pages  j/k move selection  Enter open detail  i show job detail  Left / Right move horizontal view in overview and wide tables  Mouse click or double-click  Wheel scroll"
     );
     frame.render_widget(
         Paragraph::new(nav)
@@ -1994,7 +2216,7 @@ fn render_footer(
 
     let page_hint = match app.current_page() {
         Page::Overview => {
-            "Overview: g change metric  p pin partition  Enter open partition detail  Click column headers to sort"
+            "Overview: g change metric  p pin partition  Enter open partition detail  Left / Right move horizontal view  Click column headers to sort"
         }
         Page::MyJobs | Page::AllJobs => {
             "Queue: f change state filter  s change sort  m toggle mine-only  x cancel selected job  X review visible jobs for cancel  Click column headers to sort  Back: b or ← Overview"
@@ -2003,7 +2225,7 @@ fn render_footer(
             "Partition: s change job sort  [ or ] choose node  n open selected node  g metric  m toggle mine-only  x cancel selected job  b back"
         }
         Page::Users => {
-            "Users: s change sort  m toggle mine-only  Click column headers to sort  Search filters users and the selected user's jobs"
+            "Users: s change sort  m toggle mine-only  Left / Right move horizontal view  Click column headers to sort  Search filters users and the selected user's jobs"
         }
         Page::NodeDetail => {
             "Node: u user filter  f state filter  w where filter  y why filter  c clear filters  x cancel selected job  b back"
@@ -2174,7 +2396,7 @@ fn render_help_modal(frame: &mut Frame, _app: &AppState, theme: &Theme, hit_map:
             "i shows job detail. x cancels the selected job. X reviews visible jobs for bulk cancel.",
         ),
         Line::from(
-            "Wide queue tables can be moved horizontally with Left / Right. In the job-detail modal, clicking outside the panel closes it.",
+            "Overview, Users, and wide queue tables can be moved horizontally with Left / Right. In the job-detail modal, clicking outside the panel closes it.",
         ),
         Line::from(
             "All cancel flows are previewed first and only allow your own active jobs by default.",
@@ -2507,47 +2729,54 @@ fn render_cancel_confirm_modal(
         top[0],
     );
 
-    let rows: Vec<Row> = preview
+    let mut lines = Vec::new();
+    for (index, candidate) in preview
         .candidates
         .iter()
-        .take(top[1].height.saturating_sub(3) as usize)
-        .map(|candidate| {
-            Row::new(vec![
-                Cell::from(candidate.job_id.clone()),
-                Cell::from(candidate.user.clone()),
-                Cell::from(candidate.partition.clone()),
-                Cell::from(candidate.state.clone()),
-                Cell::from(if candidate.allowed {
-                    "yes".to_string()
+        .take(top[1].height.saturating_sub(4) as usize)
+        .enumerate()
+    {
+        let style = if candidate.allowed {
+            theme.warning
+        } else {
+            theme.muted
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<8}", candidate.job_id), style),
+            Span::raw("  "),
+            Span::styled(
+                format!(
+                    "User: {}  Partition: {}  State: {}",
+                    candidate.user, candidate.partition, candidate.state
+                ),
+                style,
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                if candidate.allowed {
+                    "Will cancel: yes".to_string()
                 } else {
-                    candidate.reason.clone().unwrap_or_else(|| "no".to_string())
-                }),
-                Cell::from(candidate.name.clone()),
-            ])
-            .style(if candidate.allowed {
-                theme.warning
-            } else {
-                theme.muted
-            })
-        })
-        .collect();
+                    format!(
+                        "Will cancel: {}",
+                        candidate.reason.clone().unwrap_or_else(|| "no".to_string())
+                    )
+                },
+                style,
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("Name: ", theme.title.add_modifier(Modifier::BOLD)),
+            Span::styled(candidate.name.clone(), style),
+        ]));
+        if index + 1 != preview.candidates.len() {
+            lines.push(Line::from(""));
+        }
+    }
     frame.render_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Length(8),
-                Constraint::Length(10),
-                Constraint::Length(11),
-                Constraint::Length(10),
-                Constraint::Length(28),
-                Constraint::Min(18),
-            ],
-        )
-        .header(
-            Row::new(["JobID", "User", "Partition", "State", "Will cancel", "Name"])
-                .style(theme.title.add_modifier(Modifier::BOLD)),
-        )
-        .block(Block::default().borders(Borders::ALL).title("Preview")),
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Preview"))
+            .wrap(Wrap { trim: true }),
         top[1],
     );
 
@@ -2684,18 +2913,30 @@ fn render_kv_table(
     rows: &[(String, String)],
     theme: &Theme,
 ) {
-    let table_rows = rows.iter().map(|(label, value)| {
-        Row::new(vec![
-            Cell::from(Line::from(vec![Span::styled(
-                label.clone(),
+    let label_width = rows
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(10)
+        .min(16);
+    let mut lines = Vec::new();
+    for (index, (label, value)) in rows.iter().enumerate() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{label:label_width$}"),
                 theme.title.add_modifier(Modifier::BOLD),
-            )])),
-            Cell::from(value.clone()),
-        ])
-    });
+            ),
+            Span::raw("  "),
+            Span::raw(value.clone()),
+        ]));
+        if index + 1 != rows.len() {
+            lines.push(Line::from(""));
+        }
+    }
     frame.render_widget(
-        Table::new(table_rows, [Constraint::Length(14), Constraint::Min(12)])
-            .block(Block::default().borders(Borders::ALL).title(title)),
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .wrap(Wrap { trim: true }),
         area,
     );
 }
@@ -2770,6 +3011,27 @@ fn visible_column_indices(
         .len()
         .saturating_sub(indices.last().map(|value| value + 1).unwrap_or(0));
     (indices, hidden_left, hidden_right)
+}
+
+fn adaptive_segment_width(area_width: u16, preferred: usize, minimum: usize) -> usize {
+    let usable = area_width.saturating_sub(6).max(minimum as u16) as usize;
+    preferred.min(usable).max(minimum)
+}
+
+fn adaptive_text_width(
+    values: &[String],
+    area_width: u16,
+    minimum: usize,
+    maximum: usize,
+    fallback: usize,
+) -> u16 {
+    let preferred = values
+        .iter()
+        .map(|value| value.chars().count())
+        .max()
+        .unwrap_or(fallback)
+        .clamp(minimum, maximum);
+    adaptive_segment_width(area_width, preferred, minimum) as u16
 }
 
 fn max_segments(values: &[String], segment_width: usize) -> usize {

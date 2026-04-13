@@ -44,65 +44,51 @@ The implementation assumes a typical HPC user environment:
 
 ### Overview
 
-![Overview](docs/screenshots/overview-hero.png)
-
-### My Jobs
-
-![My Jobs](docs/screenshots/my-jobs.png)
-
-### All Jobs
-
-![All Jobs](docs/screenshots/all-jobs.png)
-
-### Users
-
-![Users](docs/screenshots/users.png)
-
-### Partition Detail
-
-![Partition Detail](docs/screenshots/partition-detail.png)
-
-### Node Detail
-
-![Node Detail](docs/screenshots/node-detail.png)
-
-### Job Detail
-
-![Job Detail](docs/screenshots/job-detail.png)
-
-### Cancel Preview
-
-![Cancel Preview](docs/screenshots/cancel-preview.png)
-
-## Views
-
-### Overview
-
 The initial page shows cluster-wide partition pressure, ownership distribution, running versus pending counts, and a rolling trend.
+
+![Overview](docs/screenshots/overview-hero.png)
 
 ### My Jobs
 
 Shows the current user's active jobs. This page is intended for day-to-day queue inspection and job operations.
 
+![My Jobs](docs/screenshots/my-jobs.png)
+
 ### All Jobs
 
 Shows the active queue across all visible users. Rows belonging to the current user remain visually distinct.
+
+![All Jobs](docs/screenshots/all-jobs.png)
 
 ### Users
 
 Provides per-user summaries for running jobs, pending jobs, total jobs, resource footprint, and dominant partitions. The lower pane shows active jobs for the selected user.
 
+![Users](docs/screenshots/users.png)
+
 ### Partition Detail
 
 Shows a selected partition in more detail, including node-state distribution, partition-local trends, nodes, and jobs in that partition.
+
+![Partition Detail](docs/screenshots/partition-detail.png)
 
 ### Node Detail
 
 Shows jobs on a selected node together with interactive `user`, `state`, `where`, and `why` filters.
 
+![Node Detail](docs/screenshots/node-detail.png)
+
 ### Job Detail
 
 Displays a structured modal for a selected job. Fields are grouped by purpose instead of being emitted as an unstructured text block.
+
+![Job Detail](docs/screenshots/job-detail.png)
+
+### Cancel Preview
+
+Shows the reviewed cancel set before execution. Jobs outside the current user's authority remain blocked.
+
+![Cancel Preview](docs/screenshots/cancel-preview.png)
 
 ## Installation
 

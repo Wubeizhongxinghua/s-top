@@ -5,121 +5,55 @@
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
 ![TUI](https://img.shields.io/badge/TUI-ratatui%20%2B%20crossterm-4c8eda)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%2F%20Slurm-2f855a)
-![Data Path](https://img.shields.io/badge/Data%20Path-text%20Slurm%20commands-805ad5)
+![License](https://img.shields.io/badge/License-MIT-6b7280)
 
-`sqtop` is a terminal monitor for Slurm clusters. It is designed for ordinary cluster users who need a readable, continuously refreshed view of partitions, queues, users, and jobs without relying on `slurmrestd` or Slurm JSON output.
+`sqtop` is an interactive terminal monitor for Slurm clusters. It gives ordinary HPC users a readable, continuously refreshed view of partitions, queues, users, nodes, and jobs without requiring `slurmrestd`, root access, or Slurm JSON output.
 
-The project was previously published as `s-top`. The executable, crate, and conda package name are now `sqtop`.
+The project was previously published as `s-top`. The current executable, crate, and conda package name is `sqtop`.
 
-![Overview](docs/screenshots/overview-hero.png)
+## Why sqtop
 
-## Overview
+`squeue`, `sinfo`, and `watch` are reliable, but they are not ideal for answering scheduler questions quickly:
 
-The project focuses on the scheduler view rather than low-level hardware telemetry. The main questions it aims to answer are:
+- Which partitions are saturated right now?
+- How much of the queue belongs to me versus other users?
+- Which users are consuming the most jobs and resources?
+- Which jobs are running, pending, or stuck for a specific reason?
+- What changed over the last few refresh cycles?
 
-- which partitions are busy
-- how current usage is split between the current user and other users
-- which jobs are running or pending
-- which users occupy the most resources
-- how queue pressure changes over time
+`sqtop` focuses on those questions and stays compatible with typical user-level Slurm environments.
 
-The implementation assumes a typical HPC user environment:
+## Highlights
 
-- no root privileges
-- no dependency on `slurmrestd`
-- no requirement for `squeue --json` or `sinfo --json`
-- graceful degradation when a site does not expose optional Slurm fields
+- Live partition overview with queue pressure, ownership split, and trend history
+- Separate `My Jobs`, `All Jobs`, `Users`, `Partition Detail`, and `Node Detail` views
+- Structured job detail and conservative `scancel` preview / result flows
+- Text-based Slurm collection path designed for clusters where `--json` is unavailable
+- Search, filtering, sorting, paging, and horizontal navigation for wide tables
+- Mouse support for tabs, rows, modal actions, and sortable headers
 
-## Main Features
+## Screenshots
 
-- Full-screen TUI built with `ratatui` and `crossterm`
-- Periodic refresh with cancellation and command timeouts
-- Partition overview with pressure, ownership split, and trend history
-- My Jobs and All Jobs views with search, filtering, sorting, and horizontal navigation
-- User view with per-user queue and resource summaries
-- Partition and node drill-down pages
-- Structured job detail modal
-- Conservative single-job and bulk `scancel` workflows
-- Mouse support for tabs, rows, headers, modal actions, and basic navigation
+| View | Preview |
+| --- | --- |
+| Overview | ![Overview](docs/screenshots/overview-hero.png) |
+| My Jobs | ![My Jobs](docs/screenshots/my-jobs.png) |
+| All Jobs | ![All Jobs](docs/screenshots/all-jobs.png) |
+| Users | ![Users](docs/screenshots/users.png) |
+| Partition Detail | ![Partition Detail](docs/screenshots/partition-detail.png) |
+| Node Detail | ![Node Detail](docs/screenshots/node-detail.png) |
+| Job Detail | ![Job Detail](docs/screenshots/job-detail.png) |
+| Cancel Preview | ![Cancel Preview](docs/screenshots/cancel-preview.png) |
 
-### Overview
+## Install
 
-The initial page shows cluster-wide partition pressure, ownership distribution, running versus pending counts, and a rolling trend.
-
-![Overview](docs/screenshots/overview-hero.png)
-
-### My Jobs
-
-Shows the current user's active jobs. This page is intended for day-to-day queue inspection and job operations.
-
-![My Jobs](docs/screenshots/my-jobs.png)
-
-### All Jobs
-
-Shows the active queue across all visible users. Rows belonging to the current user remain visually distinct.
-
-![All Jobs](docs/screenshots/all-jobs.png)
-
-### Users
-
-Provides per-user summaries for running jobs, pending jobs, total jobs, resource footprint, and dominant partitions. The lower pane shows active jobs for the selected user.
-
-![Users](docs/screenshots/users.png)
-
-### Partition Detail
-
-Shows a selected partition in more detail, including node-state distribution, partition-local trends, nodes, and jobs in that partition.
-
-![Partition Detail](docs/screenshots/partition-detail.png)
-
-### Node Detail
-
-Shows jobs on a selected node together with interactive `user`, `state`, `where`, and `why` filters.
-
-![Node Detail](docs/screenshots/node-detail.png)
-
-### Job Detail
-
-Displays a structured modal for a selected job. Fields are grouped by purpose instead of being emitted as an unstructured text block.
-
-![Job Detail](docs/screenshots/job-detail.png)
-
-### Cancel Preview
-
-Shows the reviewed cancel set before execution. Jobs outside the current user's authority remain blocked.
-
-![Cancel Preview](docs/screenshots/cancel-preview.png)
-
-## Installation
-
-### Requirements
-
-- Linux
-- Rust stable
-- Slurm client commands in `PATH`
-- a terminal that supports full-screen TUIs
-
-### Build From Source
-
-```bash
-cargo build --release
-```
-
-### Install Locally
-
-```bash
-cargo install --path .
-```
-
-### Install from crates.io
-
+### From crates.io
 
 ```bash
 cargo install sqtop
 ```
 
-### Install with conda
-
+### From conda
 
 ```bash
 conda install -c wubeizhongxinghua sqtop
@@ -132,23 +66,123 @@ conda config --add channels wubeizhongxinghua
 conda install sqtop
 ```
 
-## Usage
-
-### Run
+### From source
 
 ```bash
+cargo build --release
 ./target/release/sqtop
 ```
 
-### Common Options
+### Prebuilt archives
+
+Tagged releases publish prebuilt archives for supported targets through GitHub Releases.
+
+## Quick start
+
+Run the TUI:
 
 ```bash
-./target/release/sqtop --interval 2
-./target/release/sqtop --once
-./target/release/sqtop --debug-dump
+sqtop
 ```
 
-### CLI Options
+Collect one snapshot and print a summary:
+
+```bash
+sqtop --once
+```
+
+Use a faster refresh interval:
+
+```bash
+sqtop --interval 2
+```
+
+Dump raw and parsed collector output for troubleshooting:
+
+```bash
+sqtop --debug-dump
+```
+
+## Typical use cases
+
+- Check whether a partition is congested before submitting a job
+- Compare your current queue footprint with other users on the cluster
+- Inspect jobs on a specific partition or node
+- Find pending jobs by reason, placement, or owner
+- Review a selected job before canceling it
+
+## Views
+
+### Overview
+
+The default page shows partition pressure, mine-versus-others usage, running-versus-pending counts, and rolling trends.
+
+### My Jobs
+
+Focused view of the current user's active jobs, including resource footprint, placement, search, and cancel actions.
+
+### All Jobs
+
+Cluster-wide active queue view with highlighting for the current user's jobs.
+
+### Users
+
+Ranks active users by running jobs, pending jobs, total jobs, and resource footprint. The lower pane shows the selected user's active jobs.
+
+### Partition Detail
+
+Adds partition-local trends, node-state distribution, node list, and jobs in the selected partition.
+
+### Node Detail
+
+Shows jobs on a node with interactive `user`, `state`, `where`, and `why` filters.
+
+### Job Detail
+
+Opens a structured detail modal for a selected job, grouped into identity, resources, scheduling, placement, and execution sections.
+
+### Cancel Preview and Result
+
+Reviews eligible and blocked `scancel` targets before execution, then reports detailed per-job results afterward.
+
+## Keyboard and mouse
+
+### Keyboard
+
+| Key | Action | Scope |
+| --- | --- | --- |
+| `Tab` / `Shift-Tab` | Switch top-level pages | Global |
+| `q` | Go back from detail pages; quit from top-level pages | Global |
+| `j` / `k` / Up / Down | Move selection or scroll | Lists and modals |
+| `Space` / `b` | Page down / page up | Lists and modals |
+| `g` / `G` | Jump to top / bottom | Lists and modals |
+| `Enter` | Open the focused detail | Overview and lists |
+| `/` | Start live search | Searchable views |
+| `s` | Cycle sort key | Overview, Users, job lists |
+| `f` | Cycle queue-state filter | Job lists |
+| `m` | Toggle mine-only mode | Shared views |
+| `p` | Pin or unpin the current partition | Overview and job views |
+| `[` / `]` | Change selected node | Partition Detail |
+| `n` | Open selected node | Partition Detail |
+| `u` / `w` / `y` / `c` | Change or clear node filters | Node Detail |
+| `i` | Open job detail | Job lists |
+| `x` | Cancel the selected job | Job lists |
+| `X` | Preview bulk cancel | Job lists |
+| `Left` / `Right` | Move horizontal table viewport | Wide tables |
+
+### Mouse
+
+| Interaction | Result |
+| --- | --- |
+| Click a tab | Switch page |
+| Click a row | Select row |
+| Double-click a row | Open detail |
+| Click a sortable header | Sort by that column |
+| Mouse wheel | Scroll the active list or modal |
+| Click a modal action | Trigger that action |
+| Click outside the job-detail modal | Close the modal |
+
+## CLI options
 
 | Flag | Description |
 | --- | --- |
@@ -164,50 +198,9 @@ conda install sqtop
 | `--compact` | Use a denser layout |
 | `--no-color` | Disable color output |
 
-## Keybindings and Mouse Interaction
+## Data sources and compatibility
 
-### Keyboard
-
-| Key | Action | Scope |
-| --- | --- | --- |
-| `q` | Quit | Global |
-| `Tab` / `Shift-Tab` | Switch top-level pages | Global |
-| `j` / `k` / Up / Down | Move selection | Lists |
-| `Enter` | Open detail | Overview and job lists |
-| `b` / `Esc` | Go back or close modal | Detail views and modals |
-| `/` | Start live search | Global |
-| `s` | Cycle sort key | Overview, Users, job lists |
-| `f` | Cycle queue-state filter | Job lists |
-| `m` | Toggle mine-only mode | Shared views |
-| `g` | Cycle metric mode | Overview and Partition Detail |
-| `p` | Pin or unpin the current partition | Overview and job views |
-| `[` / `]` | Move selected node | Partition Detail |
-| `n` | Open selected node | Partition Detail |
-| `u` | Cycle node user filter | Node Detail |
-| `w` | Edit node `where` filter | Node Detail |
-| `y` | Edit node `why` filter | Node Detail |
-| `c` | Clear node filters | Node Detail |
-| `i` | Open job detail | Job lists |
-| `x` | Cancel the selected job | Job lists |
-| `X` | Preview bulk cancel | Job lists |
-| `Left` / `Right` | Move the horizontal column window | Wide tables |
-
-### Mouse
-
-| Interaction | Result |
-| --- | --- |
-| Click a tab | Switch page |
-| Click a row | Select row |
-| Double-click a row | Open detail |
-| Click a sortable header | Sort by that column |
-| Click the same header again | Reverse sort direction |
-| Mouse wheel | Scroll the active list |
-| Click a footer action | Trigger the action |
-| Click outside the job-detail modal | Close the modal |
-
-## Data Collection and Compatibility
-
-The fast path is based on text-oriented Slurm commands:
+The live path is intentionally built around text-oriented Slurm commands:
 
 - `sinfo`
 - `squeue`
@@ -215,37 +208,49 @@ The fast path is based on text-oriented Slurm commands:
 - `scontrol show node`
 - `scontrol show job`
 
-`sacct` is used only where historical or detail enrichment is appropriate, and it is not required for the main live views.
+`sacct` is used only for detail enrichment or optional historical views and is not required for the main TUI.
 
-Parsing rules are intentionally conservative:
+The collector is designed for user-level environments:
 
-- explicit field separators are used instead of whitespace-based parsing
-- every external command has a timeout
-- command failures degrade the corresponding panel instead of crashing the UI
-- optional fields remain optional throughout the model layer
+- no root privileges assumed
+- no `slurmrestd`
+- no requirement for `squeue --json` or `sinfo --json`
+- graceful degradation when optional fields are unavailable
 
-## Project Structure
+## Project status
+
+The repository is actively packaged and released through GitHub tags. For upcoming improvements, use the issue tracker and release history as the authoritative source instead of expecting a separate long-term roadmap document here.
+
+## Project layout
 
 | Path | Responsibility |
 | --- | --- |
 | `src/collector/` | Slurm command execution, timeout handling, cancellation, raw collection |
 | `src/model/` | Parsers, normalized data structures, aggregation |
 | `src/app.rs` | Application state, refresh orchestration, filtering, sorting, event handling |
-| `src/ui/` | Rendering, theme definitions, view composition, mouse hit testing |
+| `src/ui/` | Rendering, themes, view composition, mouse hit testing |
 | `src/cli.rs` | CLI parsing and current-user resolution |
 | `src/config.rs` | Optional configuration support |
 | `recipe/` | Conda recipe and build scripts |
-| `.github/workflows/` | Release packaging and registry publishing automation |
-| `config.example.toml` | Example configuration |
+| `.github/workflows/` | Release packaging and registry publishing |
 
 ## Limitations
 
 - Availability of `ReqTRES`, `AllocTRES`, `GRES`, memory, and GPU fields depends on site configuration
-- Pending jobs eligible for multiple partitions may appear in more than one partition-level pending aggregation
+- Pending jobs that are eligible for multiple partitions may appear in more than one partition-level pending aggregation
 - Narrow terminals still require horizontal navigation on wide tables
 - Trend rendering depends on terminal font support for Unicode symbols
-- Conda packaging is currently prepared for Linux `x86_64`; additional conda targets can be added later if needed
-- The conda package currently targets a Linux `glibc` baseline of `2.17`
+- Conda packaging currently targets Linux `x86_64`
+- The Linux conda package currently targets a `glibc` baseline of `2.17`
+
+## Community and support
+
+- [Contributing](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Support](SUPPORT.md)
+- [Security policy](SECURITY.md)
+- [Citation](CITATION.cff)
+- [Changelog](CHANGELOG.md)
 
 ## License
 

@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use sqtop in published work, please cite the software using the metadata below."
+title: "sqtop"
+version: "0.2.1"
+type: software
+license: MIT
+repository-code: "https://github.com/Wubeizhongxinghua/s-top"
+url: "https://github.com/Wubeizhongxinghua/s-top"
+authors:
+  - family-names: "Wubeizhongxinghua"
+date-released: 2026-04-14

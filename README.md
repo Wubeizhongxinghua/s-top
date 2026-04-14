@@ -73,10 +73,6 @@ cargo build --release
 ./target/release/sqtop
 ```
 
-### Prebuilt archives
-
-Tagged releases publish prebuilt archives for supported targets through GitHub Releases.
-
 ## Quick start
 
 Run the TUI:

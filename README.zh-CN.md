@@ -73,10 +73,6 @@ cargo build --release
 ./target/release/sqtop
 ```
 
-### 预编译归档
-
-带版本号的 GitHub Release 会发布预编译归档，可直接下载使用。
-
 ## 快速开始
 
 启动 TUI：

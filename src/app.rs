@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
-use std::io::stdout;
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom, stdout};
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -565,6 +567,70 @@ pub(crate) struct JobDetailModal {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LogStreamKind {
+    Stdout,
+    Stderr,
+}
+
+impl LogStreamKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Stdout => "STDOUT",
+            Self::Stderr => "STDERR",
+        }
+    }
+
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LogViewerModal {
+    pub job_id: String,
+    pub kind: LogStreamKind,
+    pub path: Option<String>,
+    pub follow: bool,
+    pub lines: VecDeque<String>,
+    pub current_line: String,
+    pub current_col: usize,
+    pub ansi_escape: String,
+    pub last_offset: u64,
+    pub status: String,
+    pub last_error: Option<String>,
+    pub initialized: bool,
+    pub last_polled_at: Instant,
+}
+
+impl LogViewerModal {
+    fn new(job_id: String, kind: LogStreamKind, path: Option<String>) -> Self {
+        let status = match path.as_deref() {
+            Some(path) if !path.trim().is_empty() => format!(
+                "{} follow is ready. Showing the last 100 lines and appending new output.",
+                kind.label()
+            ),
+            _ => format!(
+                "{} path is unavailable in this job detail. The log file cannot be opened yet.",
+                kind.label()
+            ),
+        };
+        Self {
+            job_id,
+            kind,
+            path,
+            follow: true,
+            lines: VecDeque::new(),
+            current_line: String::new(),
+            current_col: 0,
+            ansi_escape: String::new(),
+            last_offset: 0,
+            status,
+            last_error: None,
+            initialized: false,
+            last_polled_at: Instant::now() - Duration::from_secs(5),
+        }
+    }
+}
+
+
 #[derive(Debug, Clone)]
 pub(crate) struct CancelCandidate {
     pub job_id: String,
@@ -637,6 +703,7 @@ impl CancelReport {
 pub(crate) enum Modal {
     Help,
     JobDetail(JobDetailModal),
+    LogViewer(LogViewerModal),
     ConfirmCancel(CancelPreview),
     CancelResult(CancelReport),
 }
@@ -713,6 +780,8 @@ pub(crate) struct AppState {
     pub show_only_mine: bool,
     pub pinned_partition: Option<String>,
     pub modal: Option<Modal>,
+    modal_parent: Option<Box<Modal>>,
+    modal_parent_scroll: usize,
     pub hit_map: UiHitMap,
     pub history: HistoryViewState,
     pub selected_overview: usize,
@@ -785,6 +854,8 @@ impl AppState {
             show_only_mine: false,
             pinned_partition: None,
             modal: None,
+            modal_parent: None,
+            modal_parent_scroll: 0,
             hit_map: UiHitMap::default(),
             current_main_index,
             detail_partition: None,
@@ -1185,18 +1256,52 @@ impl AppState {
 
     fn set_modal(&mut self, modal: Modal) {
         self.modal = Some(modal);
+        self.modal_parent = None;
+        self.modal_parent_scroll = 0;
+        self.modal_revision = self.modal_revision.wrapping_add(1);
+    }
+
+    fn push_modal(&mut self, modal: Modal) {
+        self.modal_parent = self.modal.take().map(Box::new);
+        self.modal_parent_scroll = self.modal_scroll;
+        self.modal = Some(modal);
         self.modal_revision = self.modal_revision.wrapping_add(1);
     }
 
     fn clear_modal(&mut self) {
-        if self.modal.is_some() {
+        let had_modal = self.modal.is_some();
+        if let Some(parent) = self.modal_parent.take() {
+            self.modal = Some(*parent);
+            self.modal_scroll = self.modal_parent_scroll;
+            self.modal_parent_scroll = 0;
+        } else if self.modal.is_some() {
             self.modal = None;
+            self.modal_scroll = 0;
+        }
+        if had_modal {
             self.modal_revision = self.modal_revision.wrapping_add(1);
         }
     }
 
     fn touch_modal(&mut self) {
         self.modal_revision = self.modal_revision.wrapping_add(1);
+    }
+
+    fn refresh_modal_views(&mut self) {
+        let mut changed = false;
+        let mut keep_bottom = false;
+        if let Some(Modal::LogViewer(viewer)) = &mut self.modal {
+            if viewer.last_polled_at.elapsed() >= Duration::from_millis(500) {
+                keep_bottom = viewer.follow;
+                changed = refresh_log_viewer_modal(viewer);
+            }
+        }
+        if changed {
+            self.touch_modal();
+            if keep_bottom {
+                self.scroll_modal_to_bottom();
+            }
+        }
     }
 
     pub(crate) fn active_node_where_filter(&self) -> &str {
@@ -1581,6 +1686,21 @@ impl AppState {
         });
     }
 
+    fn open_log_viewer_from_job_detail(&mut self, kind: LogStreamKind) {
+        let Some(Modal::JobDetail(detail_modal)) = self.modal.clone() else {
+            return;
+        };
+        let path = detail_modal.detail.as_ref().and_then(|detail| match kind {
+            LogStreamKind::Stdout => detail.stdout_path.clone(),
+            LogStreamKind::Stderr => detail.stderr_path.clone(),
+        });
+        let mut viewer = LogViewerModal::new(detail_modal.job_id.clone(), kind, path);
+        refresh_log_viewer_modal(&mut viewer);
+        self.modal_scroll = 0;
+        self.push_modal(Modal::LogViewer(viewer));
+        self.scroll_modal_to_bottom();
+    }
+
     fn request_node_refresh(&mut self) {
         let Some(node) = &self.node_detail else {
             return;
@@ -1690,7 +1810,103 @@ impl AppState {
                     KeyCode::Char('G') => self.scroll_modal_to_bottom(),
                     _ => {}
                 },
-                Modal::JobDetail(_) | Modal::CancelResult(_) => match key.code {
+                Modal::JobDetail(_) => match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => self.clear_modal(),
+                    KeyCode::Char('o') => self.open_log_viewer_from_job_detail(LogStreamKind::Stdout),
+                    KeyCode::Char('e') => self.open_log_viewer_from_job_detail(LogStreamKind::Stderr),
+                    KeyCode::Down | KeyCode::Char('j') => self.scroll_modal(1),
+                    KeyCode::Up | KeyCode::Char('k') => self.scroll_modal(-1),
+                    KeyCode::Char(' ') => self.scroll_modal(page_step),
+                    KeyCode::Char('b') => self.scroll_modal(-page_step),
+                    KeyCode::Char('g') => self.scroll_modal_to_top(),
+                    KeyCode::Char('G') => self.scroll_modal_to_bottom(),
+                    _ => {}
+                },
+                Modal::LogViewer(_) => match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => self.clear_modal(),
+                    KeyCode::Char('f') => {
+                        let mut follow_on = false;
+                        let mut changed = false;
+                        if let Some(Modal::LogViewer(viewer)) = &mut self.modal {
+                            viewer.follow = !viewer.follow;
+                            viewer.status = if viewer.follow {
+                                format!(
+                                    "{} follow is ON. New lines will keep the view pinned to the bottom.",
+                                    viewer.kind.label()
+                                )
+                            } else {
+                                format!(
+                                    "{} follow is OFF. Scroll freely, then press f to resume follow.",
+                                    viewer.kind.label()
+                                )
+                            };
+                            follow_on = viewer.follow;
+                            changed = true;
+                        }
+                        if changed {
+                            self.touch_modal();
+                            if follow_on {
+                                self.scroll_modal_to_bottom();
+                            }
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => self.scroll_modal(1),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let mut changed = false;
+                        if let Some(Modal::LogViewer(viewer)) = &mut self.modal
+                            && viewer.follow
+                        {
+                            viewer.follow = false;
+                            viewer.status = format!(
+                                "{} follow is OFF while you browse earlier output. Press f to resume follow.",
+                                viewer.kind.label()
+                            );
+                            changed = true;
+                        }
+                        if changed {
+                            self.touch_modal();
+                        }
+                        self.scroll_modal(-1)
+                    }
+                    KeyCode::Char(' ') => self.scroll_modal(page_step),
+                    KeyCode::Char('b') => {
+                        let mut changed = false;
+                        if let Some(Modal::LogViewer(viewer)) = &mut self.modal
+                            && viewer.follow
+                        {
+                            viewer.follow = false;
+                            viewer.status = format!(
+                                "{} follow is OFF while you browse earlier output. Press f to resume follow.",
+                                viewer.kind.label()
+                            );
+                            changed = true;
+                        }
+                        if changed {
+                            self.touch_modal();
+                        }
+                        self.scroll_modal(-page_step)
+                    }
+                    KeyCode::Char('g') => {
+                        let mut changed = false;
+                        if let Some(Modal::LogViewer(viewer)) = &mut self.modal
+                            && viewer.follow
+                        {
+                            viewer.follow = false;
+                            viewer.status = format!(
+                                "{} follow is OFF while you browse earlier output. Press f to resume follow.",
+                                viewer.kind.label()
+                            );
+                            changed = true;
+                        }
+                        if changed {
+                            self.touch_modal();
+                        }
+                        self.scroll_modal_to_top()
+                    }
+                    KeyCode::Char('G') => self.scroll_modal_to_bottom(),
+                    _ => {}
+                },
+                Modal::CancelResult(_) => match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => self.clear_modal(),
                     KeyCode::Down | KeyCode::Char('j') => self.scroll_modal(1),
                     KeyCode::Up | KeyCode::Char('k') => self.scroll_modal(-1),
@@ -2424,6 +2640,7 @@ pub fn run_tui(settings: ResolvedCli) -> Result<()> {
 
     loop {
         app.receive_updates();
+        app.refresh_modal_views();
         let mut hit_map = UiHitMap::default();
         terminal.draw(|frame| {
             hit_map = render(frame, &app);
@@ -2697,6 +2914,217 @@ pub fn print_once_summary(snapshot: &ClusterSnapshot) {
     }
 }
 
+fn overwrite_stream_char(line: &mut String, column: &mut usize, ch: char) {
+    let mut chars = line.chars().collect::<Vec<_>>();
+    if *column >= chars.len() {
+        chars.resize(*column, ' ');
+        chars.push(ch);
+    } else {
+        chars[*column] = ch;
+    }
+    *column += 1;
+    *line = chars.into_iter().collect();
+}
+
+fn commit_stream_line(viewer: &mut LogViewerModal) {
+    viewer.lines.push_back(viewer.current_line.clone());
+    viewer.current_line.clear();
+    viewer.current_col = 0;
+}
+
+fn apply_log_stream_bytes(viewer: &mut LogViewerModal, bytes: &[u8]) {
+    let text = String::from_utf8_lossy(bytes);
+    for ch in text.chars() {
+        if !viewer.ansi_escape.is_empty() {
+            viewer.ansi_escape.push(ch);
+            if ('@'..='~').contains(&ch) {
+                viewer.ansi_escape.clear();
+            }
+            continue;
+        }
+
+        match ch {
+            '\u{1b}' => {
+                viewer.ansi_escape.clear();
+                viewer.ansi_escape.push(ch);
+            }
+            '\r' => viewer.current_col = 0,
+            '\n' => commit_stream_line(viewer),
+            '\u{08}' => viewer.current_col = viewer.current_col.saturating_sub(1),
+            '\t' => {
+                let tab_stop = 4;
+                let next = ((viewer.current_col / tab_stop) + 1) * tab_stop;
+                while viewer.current_col < next {
+                    overwrite_stream_char(&mut viewer.current_line, &mut viewer.current_col, ' ');
+                }
+            }
+            ch if ch.is_control() => {}
+            ch => overwrite_stream_char(&mut viewer.current_line, &mut viewer.current_col, ch),
+        }
+    }
+}
+
+fn read_last_log_bytes(path: &Path, max_lines: usize, max_bytes: usize) -> io::Result<(Vec<u8>, u64)> {
+    let mut file = File::open(path)?;
+    let size = file.metadata()?.len();
+    if size == 0 {
+        return Ok((Vec::new(), 0));
+    }
+    let mut position = size;
+    let mut buffer = Vec::new();
+    let mut newline_count = 0usize;
+    let mut bytes_read = 0usize;
+    while position > 0 && newline_count <= max_lines && bytes_read < max_bytes {
+        let remaining_budget = max_bytes.saturating_sub(bytes_read).max(1);
+        let chunk = position.min(8192).min(remaining_budget as u64) as usize;
+        position -= chunk as u64;
+        file.seek(SeekFrom::Start(position))?;
+        let mut chunk_buf = vec![0; chunk];
+        file.read_exact(&mut chunk_buf)?;
+        newline_count += chunk_buf.iter().filter(|byte| **byte == b'\n').count();
+        bytes_read += chunk;
+        chunk_buf.extend(buffer);
+        buffer = chunk_buf;
+    }
+    Ok((buffer, size))
+}
+
+fn read_appended_log_bytes(path: &Path, offset: u64) -> io::Result<(Vec<u8>, u64)> {
+    let mut file = File::open(path)?;
+    let size = file.metadata()?.len();
+    if size <= offset {
+        return Ok((Vec::new(), size));
+    }
+    file.seek(SeekFrom::Start(offset))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok((bytes, size))
+}
+
+fn trim_log_lines(lines: &mut VecDeque<String>, max_lines: usize) {
+    while lines.len() > max_lines {
+        lines.pop_front();
+    }
+}
+
+pub(crate) fn visible_log_rows(viewer: &LogViewerModal) -> Vec<String> {
+    let mut rows = viewer.lines.iter().cloned().collect::<Vec<_>>();
+    if !viewer.current_line.is_empty() {
+        rows.push(viewer.current_line.clone());
+    }
+    rows
+}
+
+fn refresh_log_viewer_modal(viewer: &mut LogViewerModal) -> bool {
+    const INITIAL_TAIL_LINES: usize = 100;
+    const MAX_BUFFERED_LINES: usize = 2000;
+    const INITIAL_TAIL_BYTES: usize = 256 * 1024;
+
+    viewer.last_polled_at = Instant::now();
+    let old_status = viewer.status.clone();
+    let old_error = viewer.last_error.clone();
+    let old_rows = visible_log_rows(viewer);
+    let old_offset = viewer.last_offset;
+
+    let Some(path_text) = viewer.path.as_deref() else {
+        viewer.status = format!(
+            "{} path is unavailable in this job detail. The log file cannot be opened yet.",
+            viewer.kind.label()
+        );
+        viewer.last_error = Some("path unavailable".to_string());
+        return viewer.status != old_status || viewer.last_error != old_error;
+    };
+    let trimmed_path = path_text.trim();
+    if trimmed_path.is_empty() {
+        viewer.status = format!(
+            "{} path is unavailable in this job detail. The log file cannot be opened yet.",
+            viewer.kind.label()
+        );
+        viewer.last_error = Some("path unavailable".to_string());
+        return viewer.status != old_status || viewer.last_error != old_error;
+    }
+
+    let path = Path::new(trimmed_path);
+    let result = if !viewer.initialized {
+        read_last_log_bytes(path, INITIAL_TAIL_LINES, INITIAL_TAIL_BYTES).map(|(bytes, offset)| {
+            viewer.lines.clear();
+            viewer.current_line.clear();
+            viewer.current_col = 0;
+            viewer.ansi_escape.clear();
+            apply_log_stream_bytes(viewer, &bytes);
+            viewer.last_offset = offset;
+            viewer.initialized = true;
+        })
+    } else {
+        match path.metadata() {
+            Ok(metadata) if metadata.len() < viewer.last_offset => {
+                read_last_log_bytes(path, INITIAL_TAIL_LINES, INITIAL_TAIL_BYTES).map(|(bytes, offset)| {
+                    viewer.lines.clear();
+                    viewer.current_line.clear();
+                    viewer.current_col = 0;
+                    viewer.ansi_escape.clear();
+                    apply_log_stream_bytes(viewer, &bytes);
+                    viewer.last_offset = offset;
+                })
+            }
+            Ok(_) => read_appended_log_bytes(path, viewer.last_offset).map(|(bytes, offset)| {
+                if !bytes.is_empty() {
+                    apply_log_stream_bytes(viewer, &bytes);
+                }
+                viewer.last_offset = offset;
+            }),
+            Err(error) => Err(error),
+        }
+    };
+
+    match result {
+        Ok(()) => {
+            trim_log_lines(&mut viewer.lines, MAX_BUFFERED_LINES);
+            let rows = visible_log_rows(viewer);
+            viewer.last_error = None;
+            viewer.status = if rows.is_empty() {
+                if viewer.follow {
+                    format!(
+                        "{} file is empty. Follow is ON and waiting for new output.",
+                        viewer.kind.label()
+                    )
+                } else {
+                    format!("{} file is empty.", viewer.kind.label())
+                }
+            } else if viewer.follow {
+                format!(
+                    "{} follow is ON. Carriage-return updates and new lines are rendered live, like tail -f.",
+                    viewer.kind.label()
+                )
+            } else {
+                format!(
+                    "{} follow is OFF. Scroll freely, then press f to resume live updates.",
+                    viewer.kind.label()
+                )
+            };
+        }
+        Err(error) => {
+            viewer.last_error = Some(error.to_string());
+            viewer.status = match error.kind() {
+                io::ErrorKind::NotFound => format!(
+                    "{} file does not exist yet. Follow will keep checking for it.",
+                    viewer.kind.label()
+                ),
+                io::ErrorKind::PermissionDenied => format!(
+                    "{} file is not readable with the current permissions.",
+                    viewer.kind.label()
+                ),
+                _ => format!("Could not read {}: {}", viewer.kind.label(), error),
+            };
+        }
+    }
+
+    viewer.status != old_status
+        || viewer.last_error != old_error
+        || visible_log_rows(viewer) != old_rows
+        || viewer.last_offset != old_offset
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -2877,4 +3305,34 @@ mod tests {
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].user, "myli");
     }
+    #[test]
+    fn log_stream_parser_updates_progress_lines_on_carriage_return() {
+        let mut viewer = super::LogViewerModal::new(
+            "123".to_string(),
+            super::LogStreamKind::Stderr,
+            Some("/tmp/demo.err".to_string()),
+        );
+        super::apply_log_stream_bytes(&mut viewer, b" 10%|#         | 1/10\r 20%|##        | 2/10\r 30%|###       | 3/10");
+        assert!(viewer.lines.is_empty());
+        assert_eq!(super::visible_log_rows(&viewer), vec![" 30%|###       | 3/10".to_string()]);
+    }
+
+    #[test]
+    fn log_stream_parser_keeps_normal_newline_logs_readable() {
+        let mut viewer = super::LogViewerModal::new(
+            "123".to_string(),
+            super::LogStreamKind::Stdout,
+            Some("/tmp/demo.out".to_string()),
+        );
+        super::apply_log_stream_bytes(&mut viewer, b"first line\nsecond line\nthird line");
+        assert_eq!(
+            super::visible_log_rows(&viewer),
+            vec![
+                "first line".to_string(),
+                "second line".to_string(),
+                "third line".to_string(),
+            ]
+        );
+    }
+
 }

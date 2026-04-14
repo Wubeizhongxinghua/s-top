@@ -2535,7 +2535,10 @@ fn render_footer(
         let modal_hint = match modal {
             Modal::Help => "Help: j/k scroll  Space/b page  g/G top/bottom  q or Esc close",
             Modal::JobDetail(_) => {
-                "Job Detail: j/k scroll  Space/b page  g/G top/bottom  q back  Wheel scroll"
+                "Job Detail: o stdout  e stderr  j/k scroll  Space/b page  g/G top/bottom  q back  Wheel scroll"
+            }
+            Modal::LogViewer(_) => {
+                "Log Viewer: f follow  j/k scroll  Space/b page  g/G top/bottom  q back  Wheel scroll"
             }
             Modal::ConfirmCancel(_) => {
                 "Cancel Preview: j/k scroll  Space/b page  g/G top/bottom  Enter/y confirm  q/Esc/n back"
@@ -2615,6 +2618,7 @@ fn render_modal(
     match modal {
         Modal::Help => render_help_modal(frame, app, theme, hit_map),
         Modal::JobDetail(detail) => render_job_detail_modal(frame, detail, app, theme, hit_map),
+        Modal::LogViewer(viewer) => render_log_viewer_modal(frame, viewer, app, theme, hit_map),
         Modal::ConfirmCancel(preview) => {
             render_cancel_confirm_modal(frame, preview, app, theme, hit_map)
         }
@@ -2735,7 +2739,10 @@ fn render_help_modal(frame: &mut Frame, app: &AppState, theme: &Theme, hit_map: 
             "In Partition Detail, [ and ] change the selected node and n opens that node. In Node Detail, u changes the user filter, w edits the where filter, y edits the why filter, and c clears node filters.",
         ),
         Line::from(
-            "i shows job detail. x cancels the selected job. X reviews visible jobs for bulk cancel.",
+            "i shows job detail. In Job Detail, o opens STDOUT and e opens STDERR in a live tail viewer. x cancels the selected job. X reviews visible jobs for bulk cancel.",
+        ),
+        Line::from(
+            "In the log viewer, f toggles follow mode. It starts near the last 100 lines and keeps appending new output while follow is ON.",
         ),
         Line::from(
             "Overview, Users, and wide queue tables can be moved horizontally with ← / →. In modal detail pages, click outside the panel to close.",
@@ -3080,6 +3087,163 @@ fn render_kv_box(
 
     lines.push(border_line('└', None, inner, frame_style));
     lines
+}
+
+fn render_text_box(
+    title: &str,
+    note: Option<(&str, Style)>,
+    rows: &[String],
+    width: usize,
+    frame_style: Style,
+    title_style: Style,
+    row_style: Style,
+) -> Vec<Line<'static>> {
+    let inner = width.saturating_sub(2).max(1);
+    let mut lines = Vec::new();
+    lines.push(border_line(
+        '┌',
+        Some((title, title_style)),
+        inner,
+        frame_style,
+    ));
+
+    if let Some((note_text, note_style)) = note {
+        for wrapped in wrap_text(note_text, inner) {
+            lines.push(Line::from(vec![
+                Span::styled("│", frame_style),
+                Span::styled(pad_right(&wrapped, inner), note_style),
+                Span::styled("│", frame_style),
+            ]));
+        }
+        if !rows.is_empty() {
+            lines.push(blank_box_line(inner, frame_style));
+        }
+    }
+
+    if rows.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("│", frame_style),
+            Span::styled(pad_right("No output collected yet.", inner), row_style),
+            Span::styled("│", frame_style),
+        ]));
+    } else {
+        for row in rows {
+            for wrapped in wrap_text(row, inner) {
+                lines.push(Line::from(vec![
+                    Span::styled("│", frame_style),
+                    Span::styled(pad_right(&wrapped, inner), row_style),
+                    Span::styled("│", frame_style),
+                ]));
+            }
+        }
+    }
+
+    lines.push(border_line('└', None, inner, frame_style));
+    lines
+}
+
+fn render_log_viewer_modal(
+    frame: &mut Frame,
+    viewer: &crate::app::LogViewerModal,
+    app: &AppState,
+    theme: &Theme,
+    hit_map: &mut UiHitMap,
+) {
+    let area = centered_rect(92, 86, frame.area());
+    frame.render_widget(Clear, area);
+    hit_map.push(area, MouseHit::Modal(ModalAction::Ignore));
+    let stream_style = match viewer.kind {
+        crate::app::LogStreamKind::Stdout => theme.accent,
+        crate::app::LogStreamKind::Stderr => theme.danger,
+    };
+    let body_lines = cached_detail_lines(app.modal_revision(), area.width, |content_width| {
+        let summary = render_kv_box(
+            "Log Source",
+            &[
+                kv_styled("Job ID", viewer.job_id.clone(), theme.title, theme.title),
+                kv_styled("Stream", viewer.kind.label(), stream_style, stream_style),
+                kv_styled(
+                    "Path",
+                    viewer.path.clone().unwrap_or_else(|| "N/A".to_string()),
+                    stream_style,
+                    Style::default(),
+                ),
+                kv_styled(
+                    "Follow",
+                    if viewer.follow {
+                        "ON".to_string()
+                    } else {
+                        "OFF".to_string()
+                    },
+                    if viewer.follow { theme.success } else { theme.muted },
+                    if viewer.follow { theme.success } else { theme.muted },
+                ),
+                kv_styled(
+                    "Status",
+                    viewer.status.clone(),
+                    if viewer.last_error.is_some() { theme.danger } else { stream_style },
+                    if viewer.last_error.is_some() { theme.danger } else { Style::default() },
+                ),
+            ],
+            content_width,
+            true,
+            stream_style,
+            stream_style,
+            stream_style,
+        );
+        let note = if viewer.follow {
+            Some((
+                "Equivalent to tail -n 100 -f. New lines and carriage-return updates are rendered live while follow is ON.",
+                theme.muted,
+            ))
+        } else {
+            Some((
+                "Follow is paused so you can read earlier output. Press f to resume live updates.",
+                theme.muted,
+            ))
+        };
+        let log_rows = crate::app::visible_log_rows(viewer);
+        let log_box = render_text_box(
+            "Recent Output",
+            note,
+            &log_rows,
+            content_width,
+            stream_style,
+            stream_style,
+            Style::default(),
+        );
+        let actions = render_kv_box(
+            "Actions",
+            &[
+                kv_styled("f", "toggle follow on or off", stream_style, Style::default()),
+                kv_styled("q", "return to Job Detail", theme.muted, theme.muted),
+                kv_styled(
+                    "Scroll",
+                    "j/k, arrows, Space, b, g, G, or mouse wheel",
+                    theme.muted,
+                    theme.muted,
+                ),
+            ],
+            content_width,
+            false,
+            stream_style,
+            theme.muted,
+            theme.muted,
+        );
+        render_detail_grid(vec![(summary, None), (actions, None), (log_box, None)])
+    });
+
+    render_scrollable_detail_modal(
+        frame,
+        area,
+        &format!("Log Viewer: {}", viewer.kind.label()),
+        body_lines,
+        "j/k move  Space/b page  g/G top/bottom  f follow  q Back  Wheel scroll",
+        app.modal_scroll(),
+        stream_style,
+        theme,
+        hit_map,
+    );
 }
 
 fn combine_boxes(
@@ -3555,6 +3719,22 @@ fn render_job_detail_modal(
             theme.warning,
             theme.warning,
         );
+        let stdout_path = detail
+            .stdout_path
+            .clone()
+            .unwrap_or_else(|| "N/A".to_string());
+        let stderr_path = detail
+            .stderr_path
+            .clone()
+            .unwrap_or_else(|| "N/A".to_string());
+        let stdout_available = detail
+            .stdout_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
+        let stderr_available = detail
+            .stderr_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
         let paths = render_kv_box(
             "Paths",
             &[
@@ -3564,27 +3744,49 @@ fn render_job_detail_modal(
                     theme.accent,
                     Style::default(),
                 ),
-                kv_styled(
-                    "Stdout",
-                    detail
-                        .stdout_path
-                        .clone()
-                        .unwrap_or_else(|| "N/A".to_string()),
-                    theme.accent,
-                    Style::default(),
-                ),
-                kv_styled(
-                    "Stderr",
-                    detail
-                        .stderr_path
-                        .clone()
-                        .unwrap_or_else(|| "N/A".to_string()),
-                    theme.accent,
-                    Style::default(),
-                ),
+                kv_styled("Stdout", stdout_path.clone(), theme.accent, Style::default()),
+                kv_styled("Stderr", stderr_path.clone(), theme.danger, Style::default()),
             ],
             box_width,
             false,
+            theme.detail_frame,
+            theme.accent,
+            theme.accent,
+        );
+        let logs = render_kv_box(
+            "Logs",
+            &[
+                kv_styled(
+                    "STDOUT [o]",
+                    if stdout_available {
+                        format!(
+                            "Available now. Press o to open a live tail (last 100 lines + follow).
+{}",
+                            stdout_path
+                        )
+                    } else {
+                        "Unavailable. This job detail does not expose a stdout path yet.".to_string()
+                    },
+                    theme.accent,
+                    if stdout_available { theme.accent } else { theme.muted },
+                ),
+                kv_styled(
+                    "STDERR [e]",
+                    if stderr_available {
+                        format!(
+                            "Available now. Press e to open a live tail (last 100 lines + follow).
+{}",
+                            stderr_path
+                        )
+                    } else {
+                        "Unavailable. This job detail does not expose a stderr path yet.".to_string()
+                    },
+                    theme.danger,
+                    if stderr_available { theme.danger } else { theme.muted },
+                ),
+            ],
+            box_width,
+            true,
             theme.detail_frame,
             theme.accent,
             theme.accent,
@@ -3616,13 +3818,21 @@ fn render_job_detail_modal(
             theme.muted,
         );
         let close_box = render_kv_box(
-            "Close",
-            &[kv_styled(
-                "Mouse / Keyboard",
-                "Click outside the panel to close. Keyboard: Esc, b, q, or Enter. Scroll with j/k, arrows, Space, b, g, or G.",
-                theme.muted,
-                theme.muted,
-            )],
+            "Actions",
+            &[
+                kv_styled(
+                    "Logs",
+                    "Use o for stdout and e for stderr. Both open a live viewer equivalent to tail -n 100 -f.",
+                    theme.warning,
+                    theme.warning,
+                ),
+                kv_styled(
+                    "Close / Scroll",
+                    "Click outside the panel to close. Keyboard: Esc, q, j/k, arrows, Space, b, g, or G.",
+                    theme.muted,
+                    theme.muted,
+                ),
+            ],
             content_width,
             true,
             theme.detail_frame,
@@ -3634,8 +3844,8 @@ fn render_job_detail_modal(
             render_detail_grid(vec![
                 (basic, Some(resources)),
                 (scheduling, Some(placement)),
-                (paths, Some(extra)),
-                (close_box, None),
+                (paths, Some(logs)),
+                (extra, Some(close_box)),
             ])
         } else {
             render_detail_grid(vec![
@@ -3644,6 +3854,7 @@ fn render_job_detail_modal(
                 (scheduling, None),
                 (placement, None),
                 (paths, None),
+                (logs, None),
                 (extra, None),
                 (close_box, None),
             ])
@@ -3655,7 +3866,7 @@ fn render_job_detail_modal(
         area,
         "Job Detail",
         body_lines,
-        "j/k move  Space/b page  g/G top/bottom  q Back  Wheel scroll",
+        "o stdout  e stderr  j/k move  Space/b page  g/G top/bottom  q Back  Wheel scroll",
         app.modal_scroll(),
         theme.detail_frame,
         theme,

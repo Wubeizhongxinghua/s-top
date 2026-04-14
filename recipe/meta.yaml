@@ -1,4 +1,4 @@
-{% set version = environ.get("ST_VERSION", "0.2.1") %}
+{% set version = environ.get("ST_VERSION", "0.2.2") %}
 
 package:
   name: sqtop

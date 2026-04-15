@@ -2,6 +2,14 @@
 
 This project follows a simple release-oriented changelog. For packaging artifacts and binary downloads, see the GitHub Releases page.
 
+## [0.2.3] - 2026-04-15
+
+### Fixed
+
+- Included `resv` and other non-standard node states in the partition detail node-state distribution instead of dropping them from the UI
+- Kept partition node-state summaries and search text aligned with the expanded state distribution
+- Disabled `o` and `e` log-viewer shortcuts while Job Detail is still loading, so stdout/stderr tailing only becomes available after the detail payload and file paths are ready
+
 ## [0.2.2] - 2026-04-14
 
 ### Fixed

@@ -3470,10 +3470,18 @@ fn render_job_detail_modal(
             frame,
             area,
             "Job Detail",
-            vec![Line::from(format!(
-                "Loading detail for job {}...",
-                detail.job_id
-            ))],
+            vec![
+                Line::from(format!("Loading detail for job {}...", detail.job_id)),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Logs ", theme.title),
+                    Span::raw("become available after detail loading finishes. "),
+                    Span::styled("o", theme.accent),
+                    Span::raw(" opens stdout and "),
+                    Span::styled("e", theme.danger),
+                    Span::raw(" opens stderr once the paths are loaded."),
+                ]),
+            ],
             "q Back",
             app.modal_scroll(),
             theme.detail_frame,
@@ -4897,13 +4905,24 @@ fn scaled_bar_width(value: u64, capacity: u64, width: usize) -> usize {
 
 fn build_node_state_lines(partition: &PartitionOverview, theme: &Theme) -> Vec<Line<'static>> {
     let total = partition.total_nodes.max(1) as u64;
+    let preferred = ["idle", "mix", "alloc", "drain", "down", "resv"];
+    let mut keys = preferred
+        .into_iter()
+        .filter(|key| partition.node_state_counts.contains_key(*key))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for key in partition.node_state_counts.keys() {
+        if !keys.iter().any(|existing| existing == key) {
+            keys.push(key.clone());
+        }
+    }
     let mut lines = Vec::new();
-    for key in ["idle", "mix", "alloc", "drain", "down"] {
-        let count = *partition.node_state_counts.get(key).unwrap_or(&0) as u64;
-        let state_style = match key {
+    for key in keys {
+        let count = *partition.node_state_counts.get(&key).unwrap_or(&0) as u64;
+        let state_style = match key.as_str() {
             "idle" => theme.success,
             "mix" | "alloc" => theme.running,
-            "drain" => theme.warning,
+            "drain" | "resv" => theme.warning,
             "down" => theme.danger,
             _ => theme.muted,
         };

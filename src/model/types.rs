@@ -314,9 +314,15 @@ impl PartitionOverview {
     }
 
     pub fn node_state_summary(&self) -> String {
+        let preferred = ["idle", "mix", "alloc", "drain", "down", "resv"];
         let mut parts = Vec::new();
-        for key in ["idle", "mix", "alloc", "drain", "down"] {
+        for key in preferred {
             if let Some(count) = self.node_state_counts.get(key) {
+                parts.push(format!("{key}:{count}"));
+            }
+        }
+        for (key, count) in &self.node_state_counts {
+            if !preferred.contains(&key.as_str()) {
                 parts.push(format!("{key}:{count}"));
             }
         }
@@ -515,4 +521,26 @@ mod tests {
         assert_eq!(partition.capacity_for(MetricMode::Jobs), Some(4));
         assert_eq!(partition.pressure_ratio(MetricMode::Jobs), Some(0.75));
     }
+
+    #[test]
+    fn node_state_summary_keeps_resv_and_other_extra_states() {
+        let mut node_state_counts = BTreeMap::new();
+        node_state_counts.insert("alloc".to_string(), 2);
+        node_state_counts.insert("resv".to_string(), 1);
+        node_state_counts.insert("maint".to_string(), 1);
+        let partition = PartitionOverview {
+            name: "a800".to_string(),
+            state: "UP".to_string(),
+            total_nodes: 4,
+            total_cpus: None,
+            total_mem_mb: None,
+            total_gpus: None,
+            node_state_counts,
+            mine: UsageStats::default(),
+            others: UsageStats::default(),
+        };
+
+        assert_eq!(partition.node_state_summary(), "alloc:2 resv:1 maint:1");
+    }
+
 }

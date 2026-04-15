@@ -1690,10 +1690,16 @@ impl AppState {
         let Some(Modal::JobDetail(detail_modal)) = self.modal.clone() else {
             return;
         };
-        let path = detail_modal.detail.as_ref().and_then(|detail| match kind {
+        if detail_modal.loading {
+            return;
+        }
+        let Some(detail) = detail_modal.detail.as_ref() else {
+            return;
+        };
+        let path = match kind {
             LogStreamKind::Stdout => detail.stdout_path.clone(),
             LogStreamKind::Stderr => detail.stderr_path.clone(),
-        });
+        };
         let mut viewer = LogViewerModal::new(detail_modal.job_id.clone(), kind, path);
         refresh_log_viewer_modal(&mut viewer);
         self.modal_scroll = 0;
